@@ -1286,7 +1286,7 @@ class DeviceTestCase(TestCase, ChangeLoggedFilterSetTests):
         Device.objects.filter(pk=devices[1].pk).update(primary_ip4=ipaddresses[1])
 
         # VirtualChassis assignment for filtering
-        virtual_chassis = VirtualChassis.objects.create(master=devices[0])
+        virtual_chassis = VirtualChassis.objects.create(master=devices[0], name='Virtual Chassis 1')
         Device.objects.filter(pk=devices[0].pk).update(virtual_chassis=virtual_chassis, vc_position=1, vc_priority=1)
         Device.objects.filter(pk=devices[1].pk).update(virtual_chassis=virtual_chassis, vc_position=2, vc_priority=2)
 
@@ -1314,6 +1314,10 @@ class DeviceTestCase(TestCase, ChangeLoggedFilterSetTests):
         params = {'vc_priority': [1, 2]}
         self.assertEqual(self.filterset(params, self.queryset).qs.count(), 2)
 
+    def test_virtual_chassis(self):
+        params = {'virtual_chassis': [virtual_chassis[0].name]}
+        self.assertEqual(self.filterset(params, self.queryset).qs.count(), 2)
+                  
     def test_manufacturer(self):
         manufacturers = Manufacturer.objects.all()[:2]
         params = {'manufacturer_id': [manufacturers[0].pk, manufacturers[1].pk]}
