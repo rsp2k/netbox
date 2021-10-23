@@ -940,13 +940,13 @@ class InterfaceModeChoices(ChoiceSet):
     MODE_ACCESS = 'access'
     MODE_TAGGED = 'tagged'
     MODE_TAGGED_ALL = 'tagged-all'
-    MODE_DOT1Q_TUNNEL = 'dot1q-tunnel'
+    MODE_Q_IN_Q = 'q-in-q'
 
     CHOICES = (
         (MODE_ACCESS, 'Access'),
         (MODE_TAGGED, 'Tagged'),
         (MODE_TAGGED_ALL, 'Tagged (All)'),
-        (MODE_DOT1Q_TUNNEL, '802.1ad (QinQ)'),
+        (MODE_Q_IN_Q, 'Q-in-Q (802.1ad)'),
     )
 
 
