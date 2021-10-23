@@ -32,7 +32,13 @@ class InterfaceCommonForm(forms.Form):
             raise forms.ValidationError({
                 'mode': "An access interface cannot have tagged VLANs assigned."
             })
-
+            
+        # Q-in-Q interfaces cannot be assigned tagged VLANs
+        elif self.cleaned_data['mode'] == InterfaceModeChoices.MODE_Q_IN_Q and tagged_vlans:
+            raise forms.ValidationError({
+                'mode': "A Q-in-Q (802.1ad) interface cannot have tagged VLANs assigned."
+            })            
+ 
         # Remove all tagged VLAN assignments from "tagged all" interfaces
         elif self.cleaned_data['mode'] == InterfaceModeChoices.MODE_TAGGED_ALL:
             self.cleaned_data['tagged_vlans'] = []
