@@ -125,6 +125,7 @@ function handleModeTaggedAll(): void {
 function handleModeChange(element: HTMLSelectElement): void {
   switch (element.value) {
     case 'access':
+    case 'dot1q-tunnel':
       handleModeAccess();
       break;
     case 'tagged':
