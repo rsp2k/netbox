@@ -719,8 +719,10 @@ class DeviceFilterSet(PrimaryModelFilterSet, TenancyFilterSet, LocalConfigContex
         method='_virtual_chassis_member',
         label='Is a virtual chassis member'
     )
-    virtual_chassis_name = django_filters.ModelMulipleChoiceFilter(
+    virtual_chassis = django_filters.ModelMulipleChoiceFilter(
         field_name='virtual_chassis__name'
+        queryset=VirtualChassis.objects.all(),
+        to_field_name='virtual_chassis',
         label='Virtual chassis (Name)'
     )
     console_ports = django_filters.BooleanFilter(
