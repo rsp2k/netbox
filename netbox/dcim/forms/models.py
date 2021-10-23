@@ -61,7 +61,7 @@ INTERFACE_MODE_HELP_TEXT = """
 Access: One untagged VLAN<br />
 Tagged: One untagged VLAN and/or one or more tagged VLANs<br />
 Tagged (All): Implies all VLANs are available (w/optional untagged VLAN)<br />
-QinQ: Implies 802.1ad Tunneling (QinQ), Service VLAN/TAG is set as untagged VLAN
+Q-in-Q: Implies 802.1ad Tunneling (QinQ), Service VLAN/TAG is set as untagged VLAN
 """
 
 
