@@ -1,12 +1,10 @@
-from collections import OrderedDict
-
 from django.core.validators import ValidationError
 from django.db import models
 from django.urls import reverse
 
 from extras.querysets import ConfigContextQuerySet
-from extras.utils import extras_features
 from netbox.models import ChangeLoggedModel
+from netbox.models.features import WebhooksMixin
 from utilities.utils import deepmerge
 
 
@@ -20,8 +18,7 @@ __all__ = (
 # Config contexts
 #
 
-@extras_features('webhooks')
-class ConfigContext(ChangeLoggedModel):
+class ConfigContext(WebhooksMixin, ChangeLoggedModel):
     """
     A ConfigContext represents a set of arbitrary data available to any Device or VirtualMachine matching its assigned
     qualifiers (region, site, etc.). For example, the data stored in a ConfigContext assigned to site A and tenant B
@@ -56,6 +53,11 @@ class ConfigContext(ChangeLoggedModel):
         related_name='+',
         blank=True
     )
+    locations = models.ManyToManyField(
+        to='dcim.Location',
+        related_name='+',
+        blank=True
+    )
     device_types = models.ManyToManyField(
         to='dcim.DeviceType',
         related_name='+',
@@ -68,6 +70,11 @@ class ConfigContext(ChangeLoggedModel):
     )
     platforms = models.ManyToManyField(
         to='dcim.Platform',
+        related_name='+',
+        blank=True
+    )
+    cluster_types = models.ManyToManyField(
+        to='virtualization.ClusterType',
         related_name='+',
         blank=True
     )
@@ -134,11 +141,10 @@ class ConfigContextModel(models.Model):
 
     def get_config_context(self):
         """
+        Compile all config data, overwriting lower-weight values with higher-weight values where a collision occurs.
         Return the rendered configuration context for a device or VM.
         """
-
-        # Compile all config data, overwriting lower-weight values with higher-weight values where a collision occurs
-        data = OrderedDict()
+        data = {}
 
         if not hasattr(self, 'config_context_data'):
             # The annotation is not available, so we fall back to manually querying for the config context objects

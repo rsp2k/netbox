@@ -9,7 +9,7 @@ from rest_framework.status import HTTP_201_CREATED
 from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 
-from netbox.api.views import ModelViewSet
+from netbox.api.viewsets import NetBoxModelViewSet
 from users import filtersets
 from users.models import ObjectPermission, Token, UserConfig
 from utilities.querysets import RestrictedQuerySet
@@ -29,13 +29,13 @@ class UsersRootView(APIRootView):
 # Users and groups
 #
 
-class UserViewSet(ModelViewSet):
+class UserViewSet(NetBoxModelViewSet):
     queryset = RestrictedQuerySet(model=User).prefetch_related('groups').order_by('username')
     serializer_class = serializers.UserSerializer
     filterset_class = filtersets.UserFilterSet
 
 
-class GroupViewSet(ModelViewSet):
+class GroupViewSet(NetBoxModelViewSet):
     queryset = RestrictedQuerySet(model=Group).annotate(user_count=Count('user')).order_by('name')
     serializer_class = serializers.GroupSerializer
     filterset_class = filtersets.GroupFilterSet
@@ -45,7 +45,7 @@ class GroupViewSet(ModelViewSet):
 # REST API tokens
 #
 
-class TokenViewSet(ModelViewSet):
+class TokenViewSet(NetBoxModelViewSet):
     queryset = RestrictedQuerySet(model=Token).prefetch_related('user')
     serializer_class = serializers.TokenSerializer
     filterset_class = filtersets.TokenFilterSet
@@ -57,6 +57,8 @@ class TokenViewSet(ModelViewSet):
         queryset = super().get_queryset()
         # Workaround for schema generation (drf_yasg)
         if getattr(self, 'swagger_fake_view', False):
+            return queryset.none()
+        if not self.request.user.is_authenticated:
             return queryset.none()
         if self.request.user.is_superuser:
             return queryset
@@ -74,11 +76,11 @@ class TokenProvisionView(APIView):
         serializer.is_valid()
 
         # Authenticate the user account based on the provided credentials
-        user = authenticate(
-            request=request,
-            username=serializer.data['username'],
-            password=serializer.data['password']
-        )
+        username = serializer.data.get('username')
+        password = serializer.data.get('password')
+        if not username or not password:
+            raise AuthenticationFailed("Username and password must be provided to provision a token.")
+        user = authenticate(request=request, username=username, password=password)
         if user is None:
             raise AuthenticationFailed("Invalid username/password")
 
@@ -94,7 +96,7 @@ class TokenProvisionView(APIView):
 # ObjectPermissions
 #
 
-class ObjectPermissionViewSet(ModelViewSet):
+class ObjectPermissionViewSet(NetBoxModelViewSet):
     queryset = ObjectPermission.objects.prefetch_related('object_types', 'groups', 'users')
     serializer_class = serializers.ObjectPermissionSerializer
     filterset_class = filtersets.ObjectPermissionFilterSet

@@ -1,7 +1,8 @@
-from collections import OrderedDict
+import decimal
 
 import yaml
-from django.conf import settings
+
+from django.apps import apps
 from django.contrib.contenttypes.fields import GenericRelation
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -14,11 +15,10 @@ from dcim.choices import *
 from dcim.constants import *
 from extras.models import ConfigContextModel
 from extras.querysets import ConfigContextModelQuerySet
-from extras.utils import extras_features
-from netbox.models import OrganizationalModel, PrimaryModel
+from netbox.config import ConfigItem
+from netbox.models import OrganizationalModel, NetBoxModel
 from utilities.choices import ColorChoices
 from utilities.fields import ColorField, NaturalOrderingField
-from utilities.querysets import RestrictedQuerySet
 from .device_components import *
 
 
@@ -27,6 +27,8 @@ __all__ = (
     'DeviceRole',
     'DeviceType',
     'Manufacturer',
+    'Module',
+    'ModuleType',
     'Platform',
     'VirtualChassis',
 )
@@ -36,7 +38,6 @@ __all__ = (
 # Device Types
 #
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'webhooks')
 class Manufacturer(OrganizationalModel):
     """
     A Manufacturer represents a company which produces hardware devices; for example, Juniper or Dell.
@@ -54,7 +55,10 @@ class Manufacturer(OrganizationalModel):
         blank=True
     )
 
-    objects = RestrictedQuerySet.as_manager()
+    # Generic relations
+    contacts = GenericRelation(
+        to='tenancy.ContactAssignment'
+    )
 
     class Meta:
         ordering = ['name']
@@ -66,8 +70,7 @@ class Manufacturer(OrganizationalModel):
         return reverse('dcim:manufacturer', args=[self.pk])
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'tags', 'webhooks')
-class DeviceType(PrimaryModel):
+class DeviceType(NetBoxModel):
     """
     A DeviceType represents a particular make (Manufacturer) and model of device. It specifies rack height and depth, as
     well as high-level functional role(s).
@@ -98,8 +101,10 @@ class DeviceType(PrimaryModel):
         blank=True,
         help_text='Discrete part number (optional)'
     )
-    u_height = models.PositiveSmallIntegerField(
-        default=1,
+    u_height = models.DecimalField(
+        max_digits=4,
+        decimal_places=1,
+        default=1.0,
         verbose_name='Height (U)'
     )
     is_full_depth = models.BooleanField(
@@ -115,6 +120,11 @@ class DeviceType(PrimaryModel):
         help_text='Parent devices house child devices in device bays. Leave blank '
                   'if this device type is neither a parent nor a child.'
     )
+    airflow = models.CharField(
+        max_length=50,
+        choices=DeviceAirflowChoices,
+        blank=True
+    )
     front_image = models.ImageField(
         upload_to='devicetype-images',
         blank=True
@@ -127,11 +137,9 @@ class DeviceType(PrimaryModel):
         blank=True
     )
 
-    objects = RestrictedQuerySet.as_manager()
-
-    clone_fields = [
-        'manufacturer', 'u_height', 'is_full_depth', 'subdevice_role',
-    ]
+    clone_fields = (
+        'manufacturer', 'u_height', 'is_full_depth', 'subdevice_role', 'airflow',
+    )
 
     class Meta:
         ordering = ['manufacturer', 'model']
@@ -153,114 +161,78 @@ class DeviceType(PrimaryModel):
         self._original_front_image = self.front_image
         self._original_rear_image = self.rear_image
 
+    @classmethod
+    def get_prerequisite_models(cls):
+        return [Manufacturer, ]
+
     def get_absolute_url(self):
         return reverse('dcim:devicetype', args=[self.pk])
 
+    @property
+    def get_full_name(self):
+        return f"{ self.manufacturer } { self.model }"
+
     def to_yaml(self):
-        data = OrderedDict((
-            ('manufacturer', self.manufacturer.name),
-            ('model', self.model),
-            ('slug', self.slug),
-            ('part_number', self.part_number),
-            ('u_height', self.u_height),
-            ('is_full_depth', self.is_full_depth),
-            ('subdevice_role', self.subdevice_role),
-            ('comments', self.comments),
-        ))
+        data = {
+            'manufacturer': self.manufacturer.name,
+            'model': self.model,
+            'slug': self.slug,
+            'part_number': self.part_number,
+            'u_height': float(self.u_height),
+            'is_full_depth': self.is_full_depth,
+            'subdevice_role': self.subdevice_role,
+            'airflow': self.airflow,
+            'comments': self.comments,
+        }
 
         # Component templates
         if self.consoleporttemplates.exists():
             data['console-ports'] = [
-                {
-                    'name': c.name,
-                    'type': c.type,
-                    'label': c.label,
-                    'description': c.description,
-                }
-                for c in self.consoleporttemplates.all()
+                c.to_yaml() for c in self.consoleporttemplates.all()
             ]
         if self.consoleserverporttemplates.exists():
             data['console-server-ports'] = [
-                {
-                    'name': c.name,
-                    'type': c.type,
-                    'label': c.label,
-                    'description': c.description,
-                }
-                for c in self.consoleserverporttemplates.all()
+                c.to_yaml() for c in self.consoleserverporttemplates.all()
             ]
         if self.powerporttemplates.exists():
             data['power-ports'] = [
-                {
-                    'name': c.name,
-                    'type': c.type,
-                    'maximum_draw': c.maximum_draw,
-                    'allocated_draw': c.allocated_draw,
-                    'label': c.label,
-                    'description': c.description,
-                }
-                for c in self.powerporttemplates.all()
+                c.to_yaml() for c in self.powerporttemplates.all()
             ]
         if self.poweroutlettemplates.exists():
             data['power-outlets'] = [
-                {
-                    'name': c.name,
-                    'type': c.type,
-                    'power_port': c.power_port.name if c.power_port else None,
-                    'feed_leg': c.feed_leg,
-                    'label': c.label,
-                    'description': c.description,
-                }
-                for c in self.poweroutlettemplates.all()
+                c.to_yaml() for c in self.poweroutlettemplates.all()
             ]
         if self.interfacetemplates.exists():
             data['interfaces'] = [
-                {
-                    'name': c.name,
-                    'type': c.type,
-                    'mgmt_only': c.mgmt_only,
-                    'label': c.label,
-                    'description': c.description,
-                }
-                for c in self.interfacetemplates.all()
+                c.to_yaml() for c in self.interfacetemplates.all()
             ]
         if self.frontporttemplates.exists():
             data['front-ports'] = [
-                {
-                    'name': c.name,
-                    'type': c.type,
-                    'rear_port': c.rear_port.name,
-                    'rear_port_position': c.rear_port_position,
-                    'label': c.label,
-                    'description': c.description,
-                }
-                for c in self.frontporttemplates.all()
+                c.to_yaml() for c in self.frontporttemplates.all()
             ]
         if self.rearporttemplates.exists():
             data['rear-ports'] = [
-                {
-                    'name': c.name,
-                    'type': c.type,
-                    'positions': c.positions,
-                    'label': c.label,
-                    'description': c.description,
-                }
-                for c in self.rearporttemplates.all()
+                c.to_yaml() for c in self.rearporttemplates.all()
+            ]
+        if self.modulebaytemplates.exists():
+            data['module-bays'] = [
+                c.to_yaml() for c in self.modulebaytemplates.all()
             ]
         if self.devicebaytemplates.exists():
             data['device-bays'] = [
-                {
-                    'name': c.name,
-                    'label': c.label,
-                    'description': c.description,
-                }
-                for c in self.devicebaytemplates.all()
+                c.to_yaml() for c in self.devicebaytemplates.all()
             ]
 
         return yaml.dump(dict(data), sort_keys=False)
 
     def clean(self):
         super().clean()
+
+        # U height must be divisible by 0.5
+        if self.u_height % decimal.Decimal(0.5):
+            raise ValidationError({
+                'u_height': "U height must be in increments of 0.5 rack units."
+            })
 
         # If editing an existing DeviceType to have a larger u_height, first validate that *all* instances of it have
         # room to expand within their racks. This validation will impose a very high performance penalty when there are
@@ -336,11 +308,98 @@ class DeviceType(PrimaryModel):
         return self.subdevice_role == SubdeviceRoleChoices.ROLE_CHILD
 
 
+class ModuleType(NetBoxModel):
+    """
+    A ModuleType represents a hardware element that can be installed within a device and which houses additional
+    components; for example, a line card within a chassis-based switch such as the Cisco Catalyst 6500. Like a
+    DeviceType, each ModuleType can have console, power, interface, and pass-through port templates assigned to it. It
+    cannot, however house device bays or module bays.
+    """
+    manufacturer = models.ForeignKey(
+        to='dcim.Manufacturer',
+        on_delete=models.PROTECT,
+        related_name='module_types'
+    )
+    model = models.CharField(
+        max_length=100
+    )
+    part_number = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='Discrete part number (optional)'
+    )
+    comments = models.TextField(
+        blank=True
+    )
+
+    # Generic relations
+    images = GenericRelation(
+        to='extras.ImageAttachment'
+    )
+
+    clone_fields = ('manufacturer',)
+
+    class Meta:
+        ordering = ('manufacturer', 'model')
+        unique_together = (
+            ('manufacturer', 'model'),
+        )
+
+    def __str__(self):
+        return self.model
+
+    @classmethod
+    def get_prerequisite_models(cls):
+        return [Manufacturer, ]
+
+    def get_absolute_url(self):
+        return reverse('dcim:moduletype', args=[self.pk])
+
+    def to_yaml(self):
+        data = {
+            'manufacturer': self.manufacturer.name,
+            'model': self.model,
+            'part_number': self.part_number,
+            'comments': self.comments,
+        }
+
+        # Component templates
+        if self.consoleporttemplates.exists():
+            data['console-ports'] = [
+                c.to_yaml() for c in self.consoleporttemplates.all()
+            ]
+        if self.consoleserverporttemplates.exists():
+            data['console-server-ports'] = [
+                c.to_yaml() for c in self.consoleserverporttemplates.all()
+            ]
+        if self.powerporttemplates.exists():
+            data['power-ports'] = [
+                c.to_yaml() for c in self.powerporttemplates.all()
+            ]
+        if self.poweroutlettemplates.exists():
+            data['power-outlets'] = [
+                c.to_yaml() for c in self.poweroutlettemplates.all()
+            ]
+        if self.interfacetemplates.exists():
+            data['interfaces'] = [
+                c.to_yaml() for c in self.interfacetemplates.all()
+            ]
+        if self.frontporttemplates.exists():
+            data['front-ports'] = [
+                c.to_yaml() for c in self.frontporttemplates.all()
+            ]
+        if self.rearporttemplates.exists():
+            data['rear-ports'] = [
+                c.to_yaml() for c in self.rearporttemplates.all()
+            ]
+
+        return yaml.dump(dict(data), sort_keys=False)
+
+
 #
 # Devices
 #
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'webhooks')
 class DeviceRole(OrganizationalModel):
     """
     Devices are organized by functional role; for example, "Core Switch" or "File Server". Each DeviceRole is assigned a
@@ -368,8 +427,6 @@ class DeviceRole(OrganizationalModel):
         blank=True,
     )
 
-    objects = RestrictedQuerySet.as_manager()
-
     class Meta:
         ordering = ['name']
 
@@ -380,7 +437,6 @@ class DeviceRole(OrganizationalModel):
         return reverse('dcim:devicerole', args=[self.pk])
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'webhooks')
 class Platform(OrganizationalModel):
     """
     Platform refers to the software or firmware running on a Device. For example, "Cisco IOS-XR" or "Juniper Junos".
@@ -420,8 +476,6 @@ class Platform(OrganizationalModel):
         blank=True
     )
 
-    objects = RestrictedQuerySet.as_manager()
-
     class Meta:
         ordering = ['name']
 
@@ -432,8 +486,7 @@ class Platform(OrganizationalModel):
         return reverse('dcim:platform', args=[self.pk])
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'tags', 'webhooks')
-class Device(PrimaryModel, ConfigContextModel):
+class Device(NetBoxModel, ConfigContextModel):
     """
     A Device represents a piece of physical hardware mounted within a Rack. Each Device is assigned a DeviceType,
     DeviceRole, and (optionally) a Platform. Device names are not required, however if one is set it must be unique.
@@ -512,10 +565,12 @@ class Device(PrimaryModel, ConfigContextModel):
         blank=True,
         null=True
     )
-    position = models.PositiveSmallIntegerField(
+    position = models.DecimalField(
+        max_digits=4,
+        decimal_places=1,
         blank=True,
         null=True,
-        validators=[MinValueValidator(1)],
+        validators=[MinValueValidator(1), MaxValueValidator(99.5)],
         verbose_name='Position (U)',
         help_text='The lowest-numbered unit occupied by the device'
     )
@@ -530,10 +585,15 @@ class Device(PrimaryModel, ConfigContextModel):
         choices=DeviceStatusChoices,
         default=DeviceStatusChoices.STATUS_ACTIVE
     )
+    airflow = models.CharField(
+        max_length=50,
+        choices=DeviceAirflowChoices,
+        blank=True
+    )
     primary_ip4 = models.OneToOneField(
         to='ipam.IPAddress',
         on_delete=models.SET_NULL,
-        related_name='primary_ip4_for',
+        related_name='+',
         blank=True,
         null=True,
         verbose_name='Primary IPv4'
@@ -541,7 +601,7 @@ class Device(PrimaryModel, ConfigContextModel):
     primary_ip6 = models.OneToOneField(
         to='ipam.IPAddress',
         on_delete=models.SET_NULL,
-        related_name='primary_ip6_for',
+        related_name='+',
         blank=True,
         null=True,
         verbose_name='Primary IPv6'
@@ -573,15 +633,21 @@ class Device(PrimaryModel, ConfigContextModel):
     comments = models.TextField(
         blank=True
     )
+
+    # Generic relations
+    contacts = GenericRelation(
+        to='tenancy.ContactAssignment'
+    )
     images = GenericRelation(
         to='extras.ImageAttachment'
     )
 
     objects = ConfigContextModelQuerySet.as_manager()
 
-    clone_fields = [
-        'device_type', 'device_role', 'tenant', 'platform', 'site', 'location', 'rack', 'status', 'cluster',
-    ]
+    clone_fields = (
+        'device_type', 'device_role', 'tenant', 'platform', 'site', 'location', 'rack', 'face', 'status', 'airflow',
+        'cluster', 'virtual_chassis',
+    )
 
     class Meta:
         ordering = ('_name', 'pk')  # Name may be null
@@ -592,13 +658,23 @@ class Device(PrimaryModel, ConfigContextModel):
         )
 
     def __str__(self):
-        if self.name:
+        if self.name and self.asset_tag:
+            return f'{self.name} ({self.asset_tag})'
+        elif self.name:
             return self.name
+        elif self.virtual_chassis and self.asset_tag:
+            return f'{self.virtual_chassis.name}:{self.vc_position} ({self.asset_tag})'
         elif self.virtual_chassis:
             return f'{self.virtual_chassis.name}:{self.vc_position} ({self.pk})'
+        elif self.device_type and self.asset_tag:
+            return f'{self.device_type.manufacturer} {self.device_type.model} ({self.asset_tag})'
         elif self.device_type:
             return f'{self.device_type.manufacturer} {self.device_type.model} ({self.pk})'
         return super().__str__()
+
+    @classmethod
+    def get_prerequisite_models(cls):
+        return [apps.get_model('dcim.Site'), DeviceRole, DeviceType, ]
 
     def get_absolute_url(self):
         return reverse('dcim:device', args=[self.pk])
@@ -649,17 +725,22 @@ class Device(PrimaryModel, ConfigContextModel):
                     'position': "Cannot select a rack position without assigning a rack.",
                 })
 
-        # Validate position/face combination
+        # Validate rack position and face
+        if self.position and self.position % decimal.Decimal(0.5):
+            raise ValidationError({
+                'position': "Position must be in increments of 0.5 rack units."
+            })
         if self.position and not self.face:
             raise ValidationError({
                 'face': "Must specify rack face when defining rack position.",
             })
 
         # Prevent 0U devices from being assigned to a specific position
-        if self.position and self.device_type.u_height == 0:
-            raise ValidationError({
-                'position': f"A U0 device type ({self.device_type}) cannot be assigned to a rack position."
-            })
+        if hasattr(self, 'device_type'):
+            if self.position and self.device_type.u_height == 0:
+                raise ValidationError({
+                    'position': f"A U0 device type ({self.device_type}) cannot be assigned to a rack position."
+                })
 
         if self.rack:
 
@@ -724,8 +805,8 @@ class Device(PrimaryModel, ConfigContextModel):
         if hasattr(self, 'device_type') and self.platform:
             if self.platform.manufacturer and self.platform.manufacturer != self.device_type.manufacturer:
                 raise ValidationError({
-                    'platform': "The assigned platform is limited to {} device types, but this device's type belongs "
-                                "to {}.".format(self.platform.manufacturer, self.device_type.manufacturer)
+                    'platform': f"The assigned platform is limited to {self.platform.manufacturer} device types, but "
+                                f"this device's type belongs to {self.device_type.manufacturer}."
                 })
 
         # A Device can only be assigned to a Cluster in the same Site (or no Site)
@@ -741,43 +822,53 @@ class Device(PrimaryModel, ConfigContextModel):
             })
 
     def save(self, *args, **kwargs):
-
         is_new = not bool(self.pk)
+
+        # Inherit airflow attribute from DeviceType if not set
+        if is_new and not self.airflow:
+            self.airflow = self.device_type.airflow
 
         super().save(*args, **kwargs)
 
         # If this is a new Device, instantiate all of the related components per the DeviceType definition
         if is_new:
             ConsolePort.objects.bulk_create(
-                [x.instantiate(self) for x in self.device_type.consoleporttemplates.all()]
+                [x.instantiate(device=self) for x in self.device_type.consoleporttemplates.all()]
             )
             ConsoleServerPort.objects.bulk_create(
-                [x.instantiate(self) for x in self.device_type.consoleserverporttemplates.all()]
+                [x.instantiate(device=self) for x in self.device_type.consoleserverporttemplates.all()]
             )
             PowerPort.objects.bulk_create(
-                [x.instantiate(self) for x in self.device_type.powerporttemplates.all()]
+                [x.instantiate(device=self) for x in self.device_type.powerporttemplates.all()]
             )
             PowerOutlet.objects.bulk_create(
-                [x.instantiate(self) for x in self.device_type.poweroutlettemplates.all()]
+                [x.instantiate(device=self) for x in self.device_type.poweroutlettemplates.all()]
             )
             Interface.objects.bulk_create(
-                [x.instantiate(self) for x in self.device_type.interfacetemplates.all()]
+                [x.instantiate(device=self) for x in self.device_type.interfacetemplates.all()]
             )
             RearPort.objects.bulk_create(
-                [x.instantiate(self) for x in self.device_type.rearporttemplates.all()]
+                [x.instantiate(device=self) for x in self.device_type.rearporttemplates.all()]
             )
             FrontPort.objects.bulk_create(
-                [x.instantiate(self) for x in self.device_type.frontporttemplates.all()]
+                [x.instantiate(device=self) for x in self.device_type.frontporttemplates.all()]
+            )
+            ModuleBay.objects.bulk_create(
+                [x.instantiate(device=self) for x in self.device_type.modulebaytemplates.all()]
             )
             DeviceBay.objects.bulk_create(
-                [x.instantiate(self) for x in self.device_type.devicebaytemplates.all()]
+                [x.instantiate(device=self) for x in self.device_type.devicebaytemplates.all()]
             )
+            # Avoid bulk_create to handle MPTT
+            for x in self.device_type.inventoryitemtemplates.all():
+                x.instantiate(device=self).save()
 
         # Update Site and Rack assignment for any child Devices
         devices = Device.objects.filter(parent_bay__device=self)
         for device in devices:
             device.site = self.site
             device.rack = self.rack
+            device.location = self.location
             device.save()
 
     @property
@@ -791,7 +882,7 @@ class Device(PrimaryModel, ConfigContextModel):
 
     @property
     def primary_ip(self):
-        if settings.PREFER_IPV4 and self.primary_ip4:
+        if ConfigItem('PREFER_IPV4')() and self.primary_ip4:
             return self.primary_ip4
         elif self.primary_ip6:
             return self.primary_ip6
@@ -844,16 +935,116 @@ class Device(PrimaryModel, ConfigContextModel):
         """
         return Device.objects.filter(parent_bay__device=self.pk)
 
-    def get_status_class(self):
-        return DeviceStatusChoices.CSS_CLASSES.get(self.status)
+    def get_status_color(self):
+        return DeviceStatusChoices.colors.get(self.status)
+
+
+class Module(NetBoxModel, ConfigContextModel):
+    """
+    A Module represents a field-installable component within a Device which may itself hold multiple device components
+    (for example, a line card within a chassis switch). Modules are instantiated from ModuleTypes.
+    """
+    device = models.ForeignKey(
+        to='dcim.Device',
+        on_delete=models.CASCADE,
+        related_name='modules'
+    )
+    module_bay = models.OneToOneField(
+        to='dcim.ModuleBay',
+        on_delete=models.CASCADE,
+        related_name='installed_module'
+    )
+    module_type = models.ForeignKey(
+        to='dcim.ModuleType',
+        on_delete=models.PROTECT,
+        related_name='instances'
+    )
+    serial = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name='Serial number'
+    )
+    asset_tag = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        unique=True,
+        verbose_name='Asset tag',
+        help_text='A unique tag used to identify this device'
+    )
+    comments = models.TextField(
+        blank=True
+    )
+
+    clone_fields = ('device', 'module_type')
+
+    class Meta:
+        ordering = ('module_bay',)
+
+    def __str__(self):
+        return f'{self.module_bay.name}: {self.module_type} ({self.pk})'
+
+    def get_absolute_url(self):
+        return reverse('dcim:module', args=[self.pk])
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+
+        super().save(*args, **kwargs)
+
+        adopt_components = getattr(self, '_adopt_components', False)
+        disable_replication = getattr(self, '_disable_replication', False)
+
+        # We skip adding components if the module is being edited or
+        # both replication and component adoption is disabled
+        if not is_new or (disable_replication and not adopt_components):
+            return
+
+        # Iterate all component types
+        for templates, component_attribute, component_model in [
+            ("consoleporttemplates", "consoleports", ConsolePort),
+            ("consoleserverporttemplates", "consoleserverports", ConsoleServerPort),
+            ("interfacetemplates", "interfaces", Interface),
+            ("powerporttemplates", "powerports", PowerPort),
+            ("poweroutlettemplates", "poweroutlets", PowerOutlet),
+            ("rearporttemplates", "rearports", RearPort),
+            ("frontporttemplates", "frontports", FrontPort)
+        ]:
+            create_instances = []
+            update_instances = []
+
+            # Prefetch installed components
+            installed_components = {
+                component.name: component for component in getattr(self.device, component_attribute).filter(module__isnull=True)
+            }
+
+            # Get the template for the module type.
+            for template in getattr(self.module_type, templates).all():
+                template_instance = template.instantiate(device=self.device, module=self)
+
+                if adopt_components:
+                    existing_item = installed_components.get(template_instance.name)
+
+                    # Check if there's a component with the same name already
+                    if existing_item:
+                        # Assign it to the module
+                        existing_item.module = self
+                        update_instances.append(existing_item)
+                        continue
+
+                # Only create new components if replication is enabled
+                if not disable_replication:
+                    create_instances.append(template_instance)
+
+            component_model.objects.bulk_create(create_instances)
+            component_model.objects.bulk_update(update_instances, ['module'])
 
 
 #
 # Virtual chassis
 #
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'tags', 'webhooks')
-class VirtualChassis(PrimaryModel):
+class VirtualChassis(NetBoxModel):
     """
     A collection of Devices which operate with a shared control plane (e.g. a switch stack).
     """
@@ -871,8 +1062,6 @@ class VirtualChassis(PrimaryModel):
         max_length=30,
         blank=True
     )
-
-    objects = RestrictedQuerySet.as_manager()
 
     class Meta:
         ordering = ['name']

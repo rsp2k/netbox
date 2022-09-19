@@ -4,9 +4,10 @@ from django.utils.translation import gettext as _
 from circuits.choices import CircuitStatusChoices
 from circuits.models import *
 from dcim.models import Region, Site, SiteGroup
-from extras.forms import CustomFieldModelFilterForm
-from tenancy.forms import TenancyFilterForm
-from utilities.forms import BootstrapMixin, DynamicModelMultipleChoiceField, StaticSelectMultiple, TagFilterField
+from ipam.models import ASN
+from netbox.forms import NetBoxModelFilterSetForm
+from tenancy.forms import TenancyFilterForm, ContactModelFilterForm
+from utilities.forms import DatePicker, DynamicModelMultipleChoiceField, MultipleChoiceField, TagFilterField
 
 __all__ = (
     'CircuitFilterForm',
@@ -16,29 +17,23 @@ __all__ = (
 )
 
 
-class ProviderFilterForm(BootstrapMixin, CustomFieldModelFilterForm):
+class ProviderFilterForm(ContactModelFilterForm, NetBoxModelFilterSetForm):
     model = Provider
-    field_groups = [
-        ['q', 'tag'],
-        ['region_id', 'site_group_id', 'site_id'],
-        ['asn'],
-    ]
-    q = forms.CharField(
-        required=False,
-        widget=forms.TextInput(attrs={'placeholder': _('All Fields')}),
-        label=_('Search')
+    fieldsets = (
+        (None, ('q', 'tag')),
+        ('Location', ('region_id', 'site_group_id', 'site_id')),
+        ('ASN', ('asn',)),
+        ('Contacts', ('contact', 'contact_role', 'contact_group')),
     )
     region_id = DynamicModelMultipleChoiceField(
         queryset=Region.objects.all(),
         required=False,
-        label=_('Region'),
-        fetch_trigger='open'
+        label=_('Region')
     )
     site_group_id = DynamicModelMultipleChoiceField(
         queryset=SiteGroup.objects.all(),
         required=False,
-        label=_('Site group'),
-        fetch_trigger='open'
+        label=_('Site group')
     )
     site_id = DynamicModelMultipleChoiceField(
         queryset=Site.objects.all(),
@@ -47,73 +42,62 @@ class ProviderFilterForm(BootstrapMixin, CustomFieldModelFilterForm):
             'region_id': '$region_id',
             'site_group_id': '$site_group_id',
         },
-        label=_('Site'),
-        fetch_trigger='open'
+        label=_('Site')
     )
     asn = forms.IntegerField(
         required=False,
-        label=_('ASN')
+        label=_('ASN (legacy)')
+    )
+    asn_id = DynamicModelMultipleChoiceField(
+        queryset=ASN.objects.all(),
+        required=False,
+        label=_('ASNs')
     )
     tag = TagFilterField(model)
 
 
-class ProviderNetworkFilterForm(BootstrapMixin, CustomFieldModelFilterForm):
+class ProviderNetworkFilterForm(NetBoxModelFilterSetForm):
     model = ProviderNetwork
-    field_groups = (
-        ('q', 'tag'),
-        ('provider_id',),
-    )
-    q = forms.CharField(
-        required=False,
-        widget=forms.TextInput(attrs={'placeholder': _('All Fields')}),
-        label=_('Search')
+    fieldsets = (
+        (None, ('q', 'tag')),
+        ('Attributes', ('provider_id', 'service_id')),
     )
     provider_id = DynamicModelMultipleChoiceField(
         queryset=Provider.objects.all(),
         required=False,
-        label=_('Provider'),
-        fetch_trigger='open'
+        label=_('Provider')
+    )
+    service_id = forms.CharField(
+        max_length=100,
+        required=False
     )
     tag = TagFilterField(model)
 
 
-class CircuitTypeFilterForm(BootstrapMixin, CustomFieldModelFilterForm):
+class CircuitTypeFilterForm(NetBoxModelFilterSetForm):
     model = CircuitType
-    field_groups = [
-        ['q'],
-    ]
-    q = forms.CharField(
-        required=False,
-        widget=forms.TextInput(attrs={'placeholder': _('All Fields')}),
-        label=_('Search')
-    )
+    tag = TagFilterField(model)
 
 
-class CircuitFilterForm(BootstrapMixin, TenancyFilterForm, CustomFieldModelFilterForm):
+class CircuitFilterForm(TenancyFilterForm, ContactModelFilterForm, NetBoxModelFilterSetForm):
     model = Circuit
-    field_groups = [
-        ['q', 'tag'],
-        ['provider_id', 'provider_network_id'],
-        ['type_id', 'status', 'commit_rate'],
-        ['region_id', 'site_group_id', 'site_id'],
-        ['tenant_group_id', 'tenant_id'],
-    ]
-    q = forms.CharField(
-        required=False,
-        widget=forms.TextInput(attrs={'placeholder': _('All Fields')}),
-        label=_('Search')
+    fieldsets = (
+        (None, ('q', 'tag')),
+        ('Provider', ('provider_id', 'provider_network_id')),
+        ('Attributes', ('type_id', 'status', 'install_date', 'termination_date', 'commit_rate')),
+        ('Location', ('region_id', 'site_group_id', 'site_id')),
+        ('Tenant', ('tenant_group_id', 'tenant_id')),
+        ('Contacts', ('contact', 'contact_role', 'contact_group')),
     )
     type_id = DynamicModelMultipleChoiceField(
         queryset=CircuitType.objects.all(),
         required=False,
-        label=_('Type'),
-        fetch_trigger='open'
+        label=_('Type')
     )
     provider_id = DynamicModelMultipleChoiceField(
         queryset=Provider.objects.all(),
         required=False,
-        label=_('Provider'),
-        fetch_trigger='open'
+        label=_('Provider')
     )
     provider_network_id = DynamicModelMultipleChoiceField(
         queryset=ProviderNetwork.objects.all(),
@@ -121,25 +105,21 @@ class CircuitFilterForm(BootstrapMixin, TenancyFilterForm, CustomFieldModelFilte
         query_params={
             'provider_id': '$provider_id'
         },
-        label=_('Provider network'),
-        fetch_trigger='open'
+        label=_('Provider network')
     )
-    status = forms.MultipleChoiceField(
+    status = MultipleChoiceField(
         choices=CircuitStatusChoices,
-        required=False,
-        widget=StaticSelectMultiple()
+        required=False
     )
     region_id = DynamicModelMultipleChoiceField(
         queryset=Region.objects.all(),
         required=False,
-        label=_('Region'),
-        fetch_trigger='open'
+        label=_('Region')
     )
     site_group_id = DynamicModelMultipleChoiceField(
         queryset=SiteGroup.objects.all(),
         required=False,
-        label=_('Site group'),
-        fetch_trigger='open'
+        label=_('Site group')
     )
     site_id = DynamicModelMultipleChoiceField(
         queryset=Site.objects.all(),
@@ -148,8 +128,15 @@ class CircuitFilterForm(BootstrapMixin, TenancyFilterForm, CustomFieldModelFilte
             'region_id': '$region_id',
             'site_group_id': '$site_group_id',
         },
-        label=_('Site'),
-        fetch_trigger='open'
+        label=_('Site')
+    )
+    install_date = forms.DateField(
+        required=False,
+        widget=DatePicker
+    )
+    termination_date = forms.DateField(
+        required=False,
+        widget=DatePicker
     )
     commit_rate = forms.IntegerField(
         required=False,

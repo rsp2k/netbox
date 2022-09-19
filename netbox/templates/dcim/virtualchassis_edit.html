@@ -51,15 +51,13 @@
                       {% endfor %}
                       {% with device=form.instance virtual_chassis=vc_form.instance %}
                           <tr>
-                              <td>
-                                  <a href="{{ device.get_absolute_url }}">{{ device }}</a>
-                              </td>
+                              <td>{{ device|linkify }}</td>
                               <td>{{ device.pk }}</td>
                               <td>
                                   {% if device.rack %}
-                                      {{ device.rack }} / {{ device.position }}
+                                      {{ device.rack }} / {{ device.position|floatformat }}
                                   {% else %}
-                                      <span class="text-muted">&mdash;</span>
+                                      {{ ''|placeholder }}
                                   {% endif %}
                               </td>
                               <td>{{ device.serial|placeholder }}</td>

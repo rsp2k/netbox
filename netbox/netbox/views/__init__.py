@@ -2,31 +2,31 @@ import platform
 import sys
 
 from django.conf import settings
-from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
-from django.db.models import F
 from django.http import HttpResponseServerError
 from django.shortcuts import redirect, render
 from django.template import loader
 from django.template.exceptions import TemplateDoesNotExist
 from django.urls import reverse
 from django.views.decorators.csrf import requires_csrf_token
-from django.views.defaults import ERROR_500_TEMPLATE_NAME
+from django.views.defaults import ERROR_500_TEMPLATE_NAME, page_not_found
 from django.views.generic import View
 from packaging import version
+from sentry_sdk import capture_message
 
 from circuits.models import Circuit, Provider
 from dcim.models import (
     Cable, ConsolePort, Device, DeviceType, Interface, PowerPanel, PowerFeed, PowerPort, Rack, Site,
 )
-from extras.choices import JobResultStatusChoices
-from extras.models import ObjectChange, JobResult
+from extras.models import ObjectChange
 from extras.tables import ObjectChangeTable
 from ipam.models import Aggregate, IPAddress, IPRange, Prefix, VLAN, VRF
-from netbox.constants import SEARCH_MAX_RESULTS, SEARCH_TYPES
+from netbox.constants import SEARCH_MAX_RESULTS
 from netbox.forms import SearchForm
+from netbox.search import SEARCH_TYPES
 from tenancy.models import Tenant
 from virtualization.models import Cluster, VirtualMachine
+from wireless.models import WirelessLAN, WirelessLink
 
 
 class HomeView(View):
@@ -37,22 +37,14 @@ class HomeView(View):
             return redirect("login")
 
         connected_consoleports = ConsolePort.objects.restrict(request.user, 'view').prefetch_related('_path').filter(
-            _path__destination_id__isnull=False
+            _path__is_complete=True
         )
         connected_powerports = PowerPort.objects.restrict(request.user, 'view').prefetch_related('_path').filter(
-            _path__destination_id__isnull=False
+            _path__is_complete=True
         )
         connected_interfaces = Interface.objects.restrict(request.user, 'view').prefetch_related('_path').filter(
-            _path__destination_id__isnull=False,
-            pk__lt=F('_path__destination_id')
+            _path__is_complete=True
         )
-
-        # Report Results
-        report_content_type = ContentType.objects.get(app_label='extras', model='report')
-        report_results = JobResult.objects.filter(
-            obj_type=report_content_type,
-            status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-        ).defer('data')[:10]
 
         def build_stats():
             org = (
@@ -92,14 +84,19 @@ class HomeView(View):
                 ("dcim.view_powerpanel", "Power Panels", PowerPanel.objects.restrict(request.user, 'view').count),
                 ("dcim.view_powerfeed", "Power Feeds", PowerFeed.objects.restrict(request.user, 'view').count),
             )
+            wireless = (
+                ("wireless.view_wirelesslan", "Wireless LANs", WirelessLAN.objects.restrict(request.user, 'view').count),
+                ("wireless.view_wirelesslink", "Wireless Links", WirelessLink.objects.restrict(request.user, 'view').count),
+            )
             sections = (
                 ("Organization", org, "domain"),
                 ("IPAM", ipam, "counter"),
                 ("Virtualization", virtualization, "monitor"),
                 ("Inventory", dcim, "server"),
-                ("Connections", connections, "cable-data"),
                 ("Circuits", circuits, "transit-connection-variant"),
+                ("Connections", connections, "cable-data"),
                 ("Power", power, "flash"),
+                ("Wireless", wireless, "wifi"),
             )
 
             stats = []
@@ -127,7 +124,7 @@ class HomeView(View):
         changelog = ObjectChange.objects.restrict(request.user, 'view').prefetch_related(
             'user', 'changed_object_type'
         )[:10]
-        changelog_table = ObjectChangeTable(changelog)
+        changelog_table = ObjectChangeTable(changelog, user=request.user)
 
         # Check whether a new release is available. (Only for staff/superusers.)
         new_release = None
@@ -144,7 +141,6 @@ class HomeView(View):
         return render(request, self.template_name, {
             'search_form': SearchForm(),
             'stats': build_stats(),
-            'report_results': report_results,
             'changelog_table': changelog_table,
             'new_release': new_release,
         })
@@ -193,11 +189,19 @@ class StaticMediaFailureView(View):
     """
     Display a user-friendly error message with troubleshooting tips when a static media file fails to load.
     """
-
     def get(self, request):
         return render(request, 'media_failure.html', {
             'filename': request.GET.get('filename')
         })
+
+
+def handler_404(request, exception):
+    """
+    Wrap Django's default 404 handler to enable Sentry reporting.
+    """
+    capture_message("Page not found", level="error")
+
+    return page_not_found(request, exception)
 
 
 @requires_csrf_token

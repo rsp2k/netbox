@@ -1,42 +1,73 @@
-from django import forms
 from django.utils.translation import gettext as _
 
-from extras.forms import CustomFieldModelFilterForm
-from tenancy.models import Tenant, TenantGroup
-from utilities.forms import BootstrapMixin, DynamicModelMultipleChoiceField, TagFilterField
+from netbox.forms import NetBoxModelFilterSetForm
+from tenancy.models import *
+from tenancy.forms import ContactModelFilterForm
+from utilities.forms import DynamicModelMultipleChoiceField, TagFilterField
+
+__all__ = (
+    'ContactFilterForm',
+    'ContactGroupFilterForm',
+    'ContactRoleFilterForm',
+    'TenantFilterForm',
+    'TenantGroupFilterForm',
+)
 
 
-class TenantGroupFilterForm(BootstrapMixin, CustomFieldModelFilterForm):
+#
+# Tenants
+#
+
+class TenantGroupFilterForm(NetBoxModelFilterSetForm):
     model = TenantGroup
-    q = forms.CharField(
-        required=False,
-        widget=forms.TextInput(attrs={'placeholder': _('All Fields')}),
-        label=_('Search')
-    )
     parent_id = DynamicModelMultipleChoiceField(
         queryset=TenantGroup.objects.all(),
         required=False,
-        label=_('Parent group'),
-        fetch_trigger='open'
+        label=_('Parent group')
     )
+    tag = TagFilterField(model)
 
 
-class TenantFilterForm(BootstrapMixin, CustomFieldModelFilterForm):
+class TenantFilterForm(ContactModelFilterForm, NetBoxModelFilterSetForm):
     model = Tenant
-    field_groups = (
-        ('q', 'tag'),
-        ('group_id',),
-    )
-    q = forms.CharField(
-        required=False,
-        widget=forms.TextInput(attrs={'placeholder': _('All Fields')}),
-        label=_('Search')
+    fieldsets = (
+        (None, ('q', 'tag', 'group_id')),
+        ('Contacts', ('contact', 'contact_role', 'contact_group'))
     )
     group_id = DynamicModelMultipleChoiceField(
         queryset=TenantGroup.objects.all(),
         required=False,
         null_option='None',
-        label=_('Group'),
-        fetch_trigger='open'
+        label=_('Group')
+    )
+    tag = TagFilterField(model)
+
+
+#
+# Contacts
+#
+
+class ContactGroupFilterForm(NetBoxModelFilterSetForm):
+    model = ContactGroup
+    parent_id = DynamicModelMultipleChoiceField(
+        queryset=ContactGroup.objects.all(),
+        required=False,
+        label=_('Parent group')
+    )
+    tag = TagFilterField(model)
+
+
+class ContactRoleFilterForm(NetBoxModelFilterSetForm):
+    model = ContactRole
+    tag = TagFilterField(model)
+
+
+class ContactFilterForm(NetBoxModelFilterSetForm):
+    model = Contact
+    group_id = DynamicModelMultipleChoiceField(
+        queryset=ContactGroup.objects.all(),
+        required=False,
+        null_option='None',
+        label=_('Group')
     )
     tag = TagFilterField(model)

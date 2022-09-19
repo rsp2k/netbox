@@ -42,6 +42,7 @@ FILTER_TREENODE_NEGATION_LOOKUP_MAP = dict(
 ADVISORY_LOCK_KEYS = {
     'available-prefixes': 100100,
     'available-ips': 100200,
+    'available-vlans': 100300,
 }
 
 #
@@ -57,6 +58,7 @@ HTTP_REQUEST_META_SAFE_COPY = [
     'HTTP_HOST',
     'HTTP_REFERER',
     'HTTP_USER_AGENT',
+    'HTTP_X_FORWARDED_FOR',
     'QUERY_STRING',
     'REMOTE_ADDR',
     'REMOTE_HOST',

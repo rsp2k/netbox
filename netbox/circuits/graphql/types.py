@@ -1,5 +1,7 @@
 from circuits import filtersets, models
-from netbox.graphql.types import ObjectType, OrganizationalObjectType, PrimaryObjectType
+from dcim.graphql.mixins import CabledObjectMixin
+from extras.graphql.mixins import CustomFieldsMixin, TagsMixin
+from netbox.graphql.types import ObjectType, OrganizationalObjectType, NetBoxObjectType
 
 __all__ = (
     'CircuitTerminationType',
@@ -10,7 +12,7 @@ __all__ = (
 )
 
 
-class CircuitTerminationType(ObjectType):
+class CircuitTerminationType(CustomFieldsMixin, TagsMixin, CabledObjectMixin, ObjectType):
 
     class Meta:
         model = models.CircuitTermination
@@ -18,7 +20,7 @@ class CircuitTerminationType(ObjectType):
         filterset_class = filtersets.CircuitTerminationFilterSet
 
 
-class CircuitType(PrimaryObjectType):
+class CircuitType(NetBoxObjectType):
 
     class Meta:
         model = models.Circuit
@@ -34,7 +36,7 @@ class CircuitTypeType(OrganizationalObjectType):
         filterset_class = filtersets.CircuitTypeFilterSet
 
 
-class ProviderType(PrimaryObjectType):
+class ProviderType(NetBoxObjectType):
 
     class Meta:
         model = models.Provider
@@ -42,7 +44,7 @@ class ProviderType(PrimaryObjectType):
         filterset_class = filtersets.ProviderFilterSet
 
 
-class ProviderNetworkType(PrimaryObjectType):
+class ProviderNetworkType(NetBoxObjectType):
 
     class Meta:
         model = models.ProviderNetwork

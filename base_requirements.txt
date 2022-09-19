@@ -1,6 +1,10 @@
+# HTML sanitizer
+# https://github.com/mozilla/bleach
+bleach
+
 # The Python web framework on which NetBox is built
 # https://github.com/django/django
-Django
+Django<4.1
 
 # Django middleware which permits cross-domain API requests
 # https://github.com/OttoYiu/django-cors-headers
@@ -30,9 +34,13 @@ django-pglocks
 # https://github.com/korfuri/django-prometheus
 django-prometheus
 
-# Django chaching backend using Redis
+# Django caching backend using Redis
 # https://github.com/jazzband/django-redis
 django-redis
+
+# Django extensions for Rich (terminal text rendering)
+# https://github.com/adamchainz/django-rich
+django-rich
 
 # Django integration for RQ (Reqis queuing)
 # https://github.com/rq/django-rq
@@ -82,8 +90,12 @@ markdown-include
 # https://github.com/squidfunk/mkdocs-material
 mkdocs-material
 
+# Introspection for embedded code
+# https://github.com/mkdocstrings/mkdocstrings
+mkdocstrings[python-legacy]
+
 # Library for manipulating IP prefixes and addresses
-# https://github.com/drkjam/netaddr
+# https://github.com/netaddr/netaddr
 netaddr
 
 # Fork of PIL (Python Imaging Library) for image processing
@@ -98,9 +110,17 @@ psycopg2-binary
 # https://github.com/yaml/pyyaml
 PyYAML
 
-# In-memory key/value store used for caching and queuing
-# https://github.com/andymccurdy/redis-py
-redis
+# Sentry SDK
+# https://github.com/getsentry/sentry-python
+sentry-sdk
+
+# Social authentication framework
+# https://github.com/python-social-auth/social-core
+social-auth-core
+
+# Django app for social-auth-core
+# https://github.com/python-social-auth/social-app-django
+social-auth-app-django
 
 # SVG image rendering (used for rack elevations)
 # https://github.com/mozman/svgwrite
@@ -109,3 +129,7 @@ svgwrite
 # Tabular dataset library (for table-based exports)
 # https://github.com/jazzband/tablib
 tablib
+
+# Timezone data (required by django-timezone-field on Python 3.9+)
+# https://github.com/python/tzdata
+tzdata

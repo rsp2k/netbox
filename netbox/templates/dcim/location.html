@@ -1,13 +1,22 @@
 {% extends 'generic/object.html' %}
 {% load helpers %}
 {% load plugins %}
+{% load render_table from django_tables2 %}
 
 {% block breadcrumbs %}
   {{ block.super }}
   {% for location in object.get_ancestors %}
-    <li class="breadcrumb-item"><a href="{{ location.get_absolute_url }}">{{ location }}</a></li>
+    <li class="breadcrumb-item">{{ location|linkify }}</li>
   {% endfor %}
 {% endblock %}
+
+{% block extra_controls %}
+  {% if perms.dcim.add_location %}
+    <a href="{% url 'dcim:location_add' %}?site={{ object.site.pk }}&parent={{ object.pk }}" class="btn btn-sm btn-primary">
+      <span class="mdi mdi-plus-thick" aria-hidden="true"></span> Add Child Location
+    </a>
+  {% endif %}
+{% endblock extra_controls %}
 
 {% block content %}
 <div class="row mb-3">
@@ -28,21 +37,35 @@
           </tr>
           <tr>
             <th scope="row">Site</th>
-            <td><a href="{{ object.site.get_absolute_url }}">{{ object.site }}</a></td>
+            <td>{{ object.site|linkify }}</td>
           </tr>
           <tr>
             <th scope="row">Parent</th>
+            <td>{{ object.parent|linkify|placeholder }}</td>
+          </tr>
+          <tr>
+            <th scope="row">Status</th>
+            <td>{% badge object.get_status_display bg_color=object.get_status_color %}</td>
+          </tr>
+          <tr>
+            <th scope="row">Tenant</th>
             <td>
-              {% if object.parent %}
-                <a href="{{ object.parent.get_absolute_url }}">{{ object.parent }}</a>
-              {% else %}
-                <span class="text-muted">&mdash;</span>
+              {% if object.tenant.group %}
+                {{ object.tenant.group|linkify }} /
               {% endif %}
+              {{ object.tenant|linkify|placeholder }}
             </td>
           </tr>
           <tr>
             <th scope="row">Racks</th>
-            <td>
+            <td class="position-relative">
+              {% if rack_count %}
+                <div class="position-absolute top-50 end-0 translate-middle-y noprint">
+                  <a href="{% url 'dcim:rack_elevation_list' %}?location_id={{ object.pk }}" class="btn btn-sm btn-primary" title="View elevations">
+                    <i class="mdi mdi-server"></i>
+                  </a>
+                </div>
+              {% endif %}
               <a href="{% url 'dcim:rack_list' %}?location_id={{ object.pk }}">{{ rack_count }}</a>
             </td>
           </tr>
@@ -55,33 +78,27 @@
         </table>
       </div>
     </div>
+    {% include 'inc/panels/tags.html' %}
     {% plugin_left_page object %}
   </div>
 	<div class="col col-md-6">
-    {% include 'inc/custom_fields_panel.html' %}
-    {% include 'inc/image_attachments_panel.html' %}
+    {% include 'inc/panels/custom_fields.html' %}
+    {% include 'inc/panels/contacts.html' %}
+    {% include 'dcim/inc/nonracked_devices.html' %}
+    {% include 'inc/panels/image_attachments.html' %}
     {% plugin_right_page object %}
 	</div>
 </div>
 <div class="row mb-3">
 	<div class="col col-md-12">
     <div class="card">
-      <h5 class="card-header">
-        Locations
-      </h5>
-      <div class="card-body">
-        {% include 'inc/table.html' with table=child_locations_table %}
+      <h5 class="card-header">Locations</h5>
+      <div class="card-body table-responsive">
+        {% render_table child_locations_table 'inc/table.html' %}
+        {% include 'inc/paginator.html' with paginator=child_locations_table.paginator page=child_locations_table.page %}
       </div>
-      {% if perms.dcim.add_location %}
-        <div class="card-footer text-end noprint">
-          <a href="{% url 'dcim:location_add' %}?site={{ object.site.pk }}&parent={{ object.pk }}" class="btn btn-sm btn-primary">
-            <span class="mdi mdi-plus-thick" aria-hidden="true"></span> Add Location
-          </a>
-        </div>
-      {% endif %}
-      </div>
-      {% include 'inc/paginator.html' with paginator=child_locations_table.paginator page=child_locations_table.page %}
-      {% plugin_full_width_page object %}
+    </div>
+    {% plugin_full_width_page object %}
   </div>
 </div>
 {% endblock %}

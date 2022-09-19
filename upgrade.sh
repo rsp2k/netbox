@@ -3,12 +3,29 @@
 # its most recent release.
 
 # This script will invoke Python with the value of the PYTHON environment
-# variable (if set), or fall back to "python3". Note that NetBox v3.0+ requires
-# Python 3.7 or later.
+# variable (if set), or fall back to "python3". Note that NetBox v3.2+ requires
+# Python 3.8 or later.
 
 cd "$(dirname "$0")"
 VIRTUALENV="$(pwd -P)/venv"
 PYTHON="${PYTHON:-python3}"
+
+# Validate the minimum required Python version
+COMMAND="${PYTHON} -c 'import sys; exit(1 if sys.version_info < (3, 8) else 0)'"
+PYTHON_VERSION=$(eval "${PYTHON} -V")
+eval $COMMAND || {
+  echo "--------------------------------------------------------------------"
+  echo "ERROR: Unsupported Python version: ${PYTHON_VERSION}. NetBox requires"
+  echo "Python 3.8 or later. To specify an alternate Python executable, set"
+  echo "the PYTHON environment variable. For example:"
+  echo ""
+  echo "  sudo PYTHON=/usr/bin/python3.8 ./upgrade.sh"
+  echo ""
+  echo "To show your current Python version: ${PYTHON} -V"
+  echo "--------------------------------------------------------------------"
+  exit 1
+}
+echo "Using ${PYTHON_VERSION}"
 
 # Remove the existing virtual environment (if any)
 if [ -d "$VIRTUALENV" ]; then
@@ -89,6 +106,11 @@ eval $COMMAND || exit 1
 # Delete any expired user sessions
 COMMAND="python3 netbox/manage.py clearsessions"
 echo "Removing expired user sessions ($COMMAND)..."
+eval $COMMAND || exit 1
+
+# Clear the cache
+COMMAND="python3 netbox/manage.py clearcache"
+echo "Clearing the cache ($COMMAND)..."
 eval $COMMAND || exit 1
 
 if [ -v WARN_MISSING_VENV ]; then

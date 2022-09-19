@@ -6,8 +6,8 @@ This section of the documentation discusses installing and configuring the NetBo
 
 Begin by installing all system packages required by NetBox and its dependencies.
 
-!!! note
-    NetBox v3.0 and later require Python 3.7, 3.8, or 3.9.
+!!! warning "Python 3.8 or later required"
+    NetBox requires Python 3.8, 3.9, or 3.10.
 
 === "Ubuntu"
 
@@ -18,13 +18,13 @@ Begin by installing all system packages required by NetBox and its dependencies.
 === "CentOS"
 
     ```no-highlight
-    sudo yum install -y gcc python36 python36-devel python3-pip libxml2-devel libxslt-devel libffi-devel libpq-devel openssl-devel redhat-rpm-config
+    sudo yum install -y gcc libxml2-devel libxslt-devel libffi-devel libpq-devel openssl-devel redhat-rpm-config
     ```
 
-Before continuing with either platform, update pip (Python's package management tool) to its latest release:
+Before continuing, check that your installed Python version is at least 3.8:
 
 ```no-highlight
-sudo pip3 install --upgrade pip
+python3 -V
 ```
 
 ## Download NetBox
@@ -89,7 +89,7 @@ Resolving deltas: 100% (148/148), done.
 ```
 
 !!! note
-    Installation via git also allows you to easily try out development versions of NetBox. The `develop` branch contains all work underway for the next minor release, and the `feature` branch tracks progress on the next major release. 
+    Installation via git also allows you to easily try out different versions of NetBox. To check out a [specific NetBox release](https://github.com/netbox-community/netbox/releases), use the `git checkout` command with the desired release tag. For example, `git checkout v3.0.8`.
 
 ## Create the NetBox System User
 
@@ -112,11 +112,11 @@ Create a system user account named `netbox`. We'll configure the WSGI and HTTP s
 
 ## Configuration
 
-Move into the NetBox configuration directory and make a copy of `configuration.example.py` named `configuration.py`. This file will hold all of your local configuration parameters.
+Move into the NetBox configuration directory and make a copy of `configuration_example.py` named `configuration.py`. This file will hold all of your local configuration parameters.
 
 ```no-highlight
 cd /opt/netbox/netbox/netbox/
-sudo cp configuration.example.py configuration.py
+sudo cp configuration_example.py configuration.py
 ```
 
 Open `configuration.py` with your preferred editor to begin configuring NetBox. NetBox offers [many configuration parameters](../configuration/index.md), but only the following four are required for new installations:
@@ -142,7 +142,7 @@ ALLOWED_HOSTS = ['*']
 
 ### DATABASE
 
-This parameter holds the database configuration details. You must define the username and password used when you configured PostgreSQL. If the service is running on a remote host, update the `HOST` and `PORT` parameters accordingly. See the [configuration documentation](../configuration/required-settings.md#database) for more detail on individual parameters.
+This parameter holds the database configuration details. You must define the username and password used when you configured PostgreSQL. If the service is running on a remote host, update the `HOST` and `PORT` parameters accordingly. See the [configuration documentation](../configuration/required-parameters.md#database) for more detail on individual parameters.
 
 ```python
 DATABASE = {
@@ -157,7 +157,7 @@ DATABASE = {
 
 ### REDIS
 
-Redis is a in-memory key-value store used by NetBox for caching and background task queuing. Redis typically requires minimal configuration; the values below should suffice for most installations. See the [configuration documentation](../configuration/required-settings.md#redis) for more detail on individual parameters.
+Redis is a in-memory key-value store used by NetBox for caching and background task queuing. Redis typically requires minimal configuration; the values below should suffice for most installations. See the [configuration documentation](../configuration/required-parameters.md#redis) for more detail on individual parameters.
 
 Note that NetBox requires the specification of two separate Redis databases: `tasks` and `caching`. These may both be provided by the same Redis service, however each should have a unique numeric database ID.
 
@@ -190,7 +190,7 @@ A simple Python script named `generate_secret_key.py` is provided in the parent 
 python3 ../generate_secret_key.py
 ```
 
-!!! warning
+!!! warning "SECRET_KEY values must match"
     In the case of a highly available installation with multiple web servers, `SECRET_KEY` must be identical among all servers in order to maintain a persistent user session state.
 
 When you have finished modifying the configuration, remember to save the file.
@@ -201,7 +201,7 @@ All Python packages required by NetBox are listed in `requirements.txt` and will
 
 ### NAPALM
 
-Integration with the [NAPALM automation](../additional-features/napalm.md) library allows NetBox to fetch live data from devices and return it to a requester via its REST API. The `NAPALM_USERNAME` and `NAPALM_PASSWORD` configuration parameters define the credentials to be used when connecting to a device.
+Integration with the [NAPALM automation](../integrations/napalm.md) library allows NetBox to fetch live data from devices and return it to a requester via its REST API. The `NAPALM_USERNAME` and `NAPALM_PASSWORD` configuration parameters define the credentials to be used when connecting to a device.
 
 ```no-highlight
 sudo sh -c "echo 'napalm' >> /opt/netbox/local_requirements.txt"
@@ -209,7 +209,7 @@ sudo sh -c "echo 'napalm' >> /opt/netbox/local_requirements.txt"
 
 ### Remote File Storage
 
-By default, NetBox will use the local filesystem to store uploaded files. To use a remote filesystem, install the [`django-storages`](https://django-storages.readthedocs.io/en/stable/) library and configure your [desired storage backend](../configuration/optional-settings.md#storage_backend) in `configuration.py`.
+By default, NetBox will use the local filesystem to store uploaded files. To use a remote filesystem, install the [`django-storages`](https://django-storages.readthedocs.io/en/stable/) library and configure your [desired storage backend](../configuration/system.md#storage_backend) in `configuration.py`.
 
 ```no-highlight
 sudo sh -c "echo 'django-storages' >> /opt/netbox/local_requirements.txt"
@@ -229,10 +229,10 @@ Once NetBox has been configured, we're ready to proceed with the actual installa
 sudo /opt/netbox/upgrade.sh
 ```
 
-Note that **Python 3.7 or later is required** for NetBox v3.0 and later releases. If the default Python installation on your server does not meet this requirement, you'll need to install Python 3.7 or later separately, and pass the path to the support installation as an environment variable named `PYTHON`. (Note that the environment variable must be passed _after_ the `sudo` command.)
+Note that **Python 3.8 or later is required** for NetBox v3.2 and later releases. If the default Python installation on your server is set to a lesser version,  pass the path to the supported installation as an environment variable named `PYTHON`. (Note that the environment variable must be passed _after_ the `sudo` command.)
 
 ```no-highlight
-sudo PYTHON=/usr/bin/python3.7 /opt/netbox/upgrade.sh
+sudo PYTHON=/usr/bin/python3.8 /opt/netbox/upgrade.sh
 ```
 
 !!! note
@@ -262,7 +262,7 @@ NetBox includes a `housekeeping` management command that handles some recurring 
 A shell script which invokes this command is included at `contrib/netbox-housekeeping.sh`. It can be copied to or linked from your system's daily cron task directory, or included within the crontab directly. (If installing NetBox into a nonstandard path, be sure to update the system paths within this script first.)
 
 ```shell
-ln -s /opt/netbox/contrib/netbox-housekeeping.sh /etc/cron.daily/netbox-housekeeping
+sudo ln -s /opt/netbox/contrib/netbox-housekeeping.sh /etc/cron.daily/netbox-housekeeping
 ```
 
 See the [housekeeping documentation](../administration/housekeeping.md) for further details.
@@ -297,7 +297,7 @@ Next, connect to the name or IP of the server (as defined in `ALLOWED_HOSTS`) on
     firewall-cmd --zone=public --add-port=8000/tcp
     ```
 
-!!! danger
+!!! danger "Not for production use"
     The development server is for development and testing purposes only. It is neither performant nor secure enough for production use. **Do not use it in production.**
 
 !!! warning

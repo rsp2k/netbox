@@ -4,6 +4,7 @@ from django_rq.queues import get_connection
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.routers import APIRootView
 from rest_framework.viewsets import ReadOnlyModelViewSet, ViewSet
@@ -17,7 +18,7 @@ from extras.reports import get_report, get_reports, run_report
 from extras.scripts import get_script, get_scripts, run_script
 from netbox.api.authentication import IsAuthenticatedOrLoginNotRequired
 from netbox.api.metadata import ContentTypeMetadata
-from netbox.api.views import ModelViewSet
+from netbox.api.viewsets import NetBoxModelViewSet
 from utilities.exceptions import RQWorkerNotRunningException
 from utilities.utils import copy_safe_request, count_related
 from . import serializers
@@ -57,7 +58,7 @@ class ConfigContextQuerySetMixin:
 # Webhooks
 #
 
-class WebhookViewSet(ModelViewSet):
+class WebhookViewSet(NetBoxModelViewSet):
     metadata_class = ContentTypeMetadata
     queryset = Webhook.objects.all()
     serializer_class = serializers.WebhookSerializer
@@ -68,36 +69,18 @@ class WebhookViewSet(ModelViewSet):
 # Custom fields
 #
 
-class CustomFieldViewSet(ModelViewSet):
+class CustomFieldViewSet(NetBoxModelViewSet):
     metadata_class = ContentTypeMetadata
     queryset = CustomField.objects.all()
     serializer_class = serializers.CustomFieldSerializer
     filterset_class = filtersets.CustomFieldFilterSet
 
 
-class CustomFieldModelViewSet(ModelViewSet):
-    """
-    Include the applicable set of CustomFields in the ModelViewSet context.
-    """
-
-    def get_serializer_context(self):
-
-        # Gather all custom fields for the model
-        content_type = ContentType.objects.get_for_model(self.queryset.model)
-        custom_fields = content_type.custom_fields.all()
-
-        context = super().get_serializer_context()
-        context.update({
-            'custom_fields': custom_fields,
-        })
-        return context
-
-
 #
 # Custom links
 #
 
-class CustomLinkViewSet(ModelViewSet):
+class CustomLinkViewSet(NetBoxModelViewSet):
     metadata_class = ContentTypeMetadata
     queryset = CustomLink.objects.all()
     serializer_class = serializers.CustomLinkSerializer
@@ -108,7 +91,7 @@ class CustomLinkViewSet(ModelViewSet):
 # Export templates
 #
 
-class ExportTemplateViewSet(ModelViewSet):
+class ExportTemplateViewSet(NetBoxModelViewSet):
     metadata_class = ContentTypeMetadata
     queryset = ExportTemplate.objects.all()
     serializer_class = serializers.ExportTemplateSerializer
@@ -119,7 +102,7 @@ class ExportTemplateViewSet(ModelViewSet):
 # Tags
 #
 
-class TagViewSet(ModelViewSet):
+class TagViewSet(NetBoxModelViewSet):
     queryset = Tag.objects.annotate(
         tagged_items=count_related(TaggedItem, 'tag')
     )
@@ -131,7 +114,7 @@ class TagViewSet(ModelViewSet):
 # Image attachments
 #
 
-class ImageAttachmentViewSet(ModelViewSet):
+class ImageAttachmentViewSet(NetBoxModelViewSet):
     metadata_class = ContentTypeMetadata
     queryset = ImageAttachment.objects.all()
     serializer_class = serializers.ImageAttachmentSerializer
@@ -142,7 +125,7 @@ class ImageAttachmentViewSet(ModelViewSet):
 # Journal entries
 #
 
-class JournalEntryViewSet(ModelViewSet):
+class JournalEntryViewSet(NetBoxModelViewSet):
     metadata_class = ContentTypeMetadata
     queryset = JournalEntry.objects.all()
     serializer_class = serializers.JournalEntrySerializer
@@ -153,9 +136,9 @@ class JournalEntryViewSet(ModelViewSet):
 # Config contexts
 #
 
-class ConfigContextViewSet(ModelViewSet):
+class ConfigContextViewSet(NetBoxModelViewSet):
     queryset = ConfigContext.objects.prefetch_related(
-        'regions', 'site_groups', 'sites', 'roles', 'platforms', 'tenant_groups', 'tenants',
+        'regions', 'site_groups', 'sites', 'locations', 'roles', 'platforms', 'tenant_groups', 'tenants',
     )
     serializer_class = serializers.ConfigContextSerializer
     filterset_class = filtersets.ConfigContextFilterSet
@@ -176,7 +159,7 @@ class ReportViewSet(ViewSet):
         # Read the PK as "<module>.<report>"
         if '.' not in pk:
             raise Http404
-        module_name, report_name = pk.split('.', 1)
+        module_name, report_name = pk.split('.', maxsplit=1)
 
         # Raise a 404 on an invalid Report module/name
         report = get_report(module_name, report_name)
@@ -196,12 +179,12 @@ class ReportViewSet(ViewSet):
             for r in JobResult.objects.filter(
                 obj_type=report_content_type,
                 status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-            ).defer('data')
+            ).order_by('name', '-created').distinct('name').defer('data')
         }
 
         # Iterate through all available Reports.
-        for module_name, reports in get_reports():
-            for report in reports:
+        for module_name, reports in get_reports().items():
+            for report in reports.values():
 
                 # Attach the relevant JobResult (if any) to each Report.
                 report.result = results.get(report.full_name, None)
@@ -253,7 +236,8 @@ class ReportViewSet(ViewSet):
             run_report,
             report.full_name,
             report_content_type,
-            request.user
+            request.user,
+            job_timeout=report.job_timeout
         )
         report.result = job_result
 
@@ -273,7 +257,7 @@ class ScriptViewSet(ViewSet):
     lookup_value_regex = '[^/]+'  # Allow dots
 
     def _get_script(self, pk):
-        module_name, script_name = pk.split('.')
+        module_name, script_name = pk.split('.', maxsplit=1)
         script = get_script(module_name, script_name)
         if script is None:
             raise Http404
@@ -287,7 +271,7 @@ class ScriptViewSet(ViewSet):
             for r in JobResult.objects.filter(
                 obj_type=script_content_type,
                 status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-            ).defer('data').order_by('created')
+            ).order_by('name', '-created').distinct('name').defer('data')
         }
 
         flat_list = []
@@ -337,7 +321,8 @@ class ScriptViewSet(ViewSet):
                 request.user,
                 data=data,
                 request=copy_safe_request(request),
-                commit=commit
+                commit=commit,
+                job_timeout=script.job_timeout,
             )
             script.result = job_result
             serializer = serializers.ScriptDetailSerializer(script, context={'request': request})
@@ -382,6 +367,7 @@ class ContentTypeViewSet(ReadOnlyModelViewSet):
     """
     Read-only list of ContentTypes. Limit results to ContentTypes pertinent to NetBox objects.
     """
+    permission_classes = (IsAuthenticated,)
     queryset = ContentType.objects.order_by('app_label', 'model')
     serializer_class = serializers.ContentTypeSerializer
     filterset_class = filtersets.ContentTypeFilterSet

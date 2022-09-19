@@ -1,31 +1,37 @@
 from django import forms
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 
 from dcim.models import Device, Interface, Site
-from extras.forms import CustomFieldModelCSVForm
 from ipam.choices import *
 from ipam.constants import *
 from ipam.models import *
+from netbox.forms import NetBoxModelCSVForm
 from tenancy.models import Tenant
 from utilities.forms import CSVChoiceField, CSVContentTypeField, CSVModelChoiceField, SlugField
 from virtualization.models import VirtualMachine, VMInterface
 
 __all__ = (
     'AggregateCSVForm',
+    'ASNCSVForm',
+    'FHRPGroupCSVForm',
     'IPAddressCSVForm',
     'IPRangeCSVForm',
+    'L2VPNCSVForm',
+    'L2VPNTerminationCSVForm',
     'PrefixCSVForm',
     'RIRCSVForm',
     'RoleCSVForm',
     'RouteTargetCSVForm',
     'ServiceCSVForm',
+    'ServiceTemplateCSVForm',
     'VLANCSVForm',
     'VLANGroupCSVForm',
     'VRFCSVForm',
 )
 
 
-class VRFCSVForm(CustomFieldModelCSVForm):
+class VRFCSVForm(NetBoxModelCSVForm):
     tenant = CSVModelChoiceField(
         queryset=Tenant.objects.all(),
         required=False,
@@ -38,7 +44,7 @@ class VRFCSVForm(CustomFieldModelCSVForm):
         fields = ('name', 'rd', 'tenant', 'enforce_unique', 'description')
 
 
-class RouteTargetCSVForm(CustomFieldModelCSVForm):
+class RouteTargetCSVForm(NetBoxModelCSVForm):
     tenant = CSVModelChoiceField(
         queryset=Tenant.objects.all(),
         required=False,
@@ -51,7 +57,7 @@ class RouteTargetCSVForm(CustomFieldModelCSVForm):
         fields = ('name', 'description', 'tenant')
 
 
-class RIRCSVForm(CustomFieldModelCSVForm):
+class RIRCSVForm(NetBoxModelCSVForm):
     slug = SlugField()
 
     class Meta:
@@ -62,7 +68,7 @@ class RIRCSVForm(CustomFieldModelCSVForm):
         }
 
 
-class AggregateCSVForm(CustomFieldModelCSVForm):
+class AggregateCSVForm(NetBoxModelCSVForm):
     rir = CSVModelChoiceField(
         queryset=RIR.objects.all(),
         to_field_name='name',
@@ -80,7 +86,26 @@ class AggregateCSVForm(CustomFieldModelCSVForm):
         fields = ('prefix', 'rir', 'tenant', 'date_added', 'description')
 
 
-class RoleCSVForm(CustomFieldModelCSVForm):
+class ASNCSVForm(NetBoxModelCSVForm):
+    rir = CSVModelChoiceField(
+        queryset=RIR.objects.all(),
+        to_field_name='name',
+        help_text='Assigned RIR'
+    )
+    tenant = CSVModelChoiceField(
+        queryset=Tenant.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text='Assigned tenant'
+    )
+
+    class Meta:
+        model = ASN
+        fields = ('asn', 'rir', 'tenant', 'description')
+        help_texts = {}
+
+
+class RoleCSVForm(NetBoxModelCSVForm):
     slug = SlugField()
 
     class Meta:
@@ -88,7 +113,7 @@ class RoleCSVForm(CustomFieldModelCSVForm):
         fields = ('name', 'slug', 'weight', 'description')
 
 
-class PrefixCSVForm(CustomFieldModelCSVForm):
+class PrefixCSVForm(NetBoxModelCSVForm):
     vrf = CSVModelChoiceField(
         queryset=VRF.objects.all(),
         to_field_name='name',
@@ -152,7 +177,7 @@ class PrefixCSVForm(CustomFieldModelCSVForm):
                 self.fields['vlan'].queryset = self.fields['vlan'].queryset.filter(**params)
 
 
-class IPRangeCSVForm(CustomFieldModelCSVForm):
+class IPRangeCSVForm(NetBoxModelCSVForm):
     vrf = CSVModelChoiceField(
         queryset=VRF.objects.all(),
         to_field_name='name',
@@ -183,7 +208,7 @@ class IPRangeCSVForm(CustomFieldModelCSVForm):
         )
 
 
-class IPAddressCSVForm(CustomFieldModelCSVForm):
+class IPAddressCSVForm(NetBoxModelCSVForm):
     vrf = CSVModelChoiceField(
         queryset=VRF.objects.all(),
         to_field_name='name',
@@ -257,11 +282,18 @@ class IPAddressCSVForm(CustomFieldModelCSVForm):
 
         device = self.cleaned_data.get('device')
         virtual_machine = self.cleaned_data.get('virtual_machine')
+        interface = self.cleaned_data.get('interface')
         is_primary = self.cleaned_data.get('is_primary')
 
         # Validate is_primary
         if is_primary and not device and not virtual_machine:
-            raise forms.ValidationError("No device or virtual machine specified; cannot set as primary IP")
+            raise forms.ValidationError({
+                "is_primary": "No device or virtual machine specified; cannot set as primary IP"
+            })
+        if is_primary and not interface:
+            raise forms.ValidationError({
+                "is_primary": "No interface specified; cannot set as primary IP"
+            })
 
     def save(self, *args, **kwargs):
 
@@ -283,23 +315,49 @@ class IPAddressCSVForm(CustomFieldModelCSVForm):
         return ipaddress
 
 
-class VLANGroupCSVForm(CustomFieldModelCSVForm):
+class FHRPGroupCSVForm(NetBoxModelCSVForm):
+    protocol = CSVChoiceField(
+        choices=FHRPGroupProtocolChoices
+    )
+    auth_type = CSVChoiceField(
+        choices=FHRPGroupAuthTypeChoices,
+        required=False
+    )
+
+    class Meta:
+        model = FHRPGroup
+        fields = ('protocol', 'group_id', 'auth_type', 'auth_key', 'description')
+
+
+class VLANGroupCSVForm(NetBoxModelCSVForm):
     slug = SlugField()
     scope_type = CSVContentTypeField(
         queryset=ContentType.objects.filter(model__in=VLANGROUP_SCOPE_TYPES),
         required=False,
         label='Scope type (app & model)'
     )
+    min_vid = forms.IntegerField(
+        min_value=VLAN_VID_MIN,
+        max_value=VLAN_VID_MAX,
+        required=False,
+        label=f'Minimum child VLAN VID (default: {VLAN_VID_MIN})'
+    )
+    max_vid = forms.IntegerField(
+        min_value=VLAN_VID_MIN,
+        max_value=VLAN_VID_MAX,
+        required=False,
+        label=f'Maximum child VLAN VID (default: {VLAN_VID_MIN})'
+    )
 
     class Meta:
         model = VLANGroup
-        fields = ('name', 'slug', 'scope_type', 'scope_id', 'description')
+        fields = ('name', 'slug', 'scope_type', 'scope_id', 'min_vid', 'max_vid', 'description')
         labels = {
             'scope_id': 'Scope ID',
         }
 
 
-class VLANCSVForm(CustomFieldModelCSVForm):
+class VLANCSVForm(NetBoxModelCSVForm):
     site = CSVModelChoiceField(
         queryset=Site.objects.all(),
         required=False,
@@ -333,12 +391,23 @@ class VLANCSVForm(CustomFieldModelCSVForm):
         model = VLAN
         fields = ('site', 'group', 'vid', 'name', 'tenant', 'status', 'role', 'description')
         help_texts = {
-            'vid': 'Numeric VLAN ID (1-4095)',
+            'vid': 'Numeric VLAN ID (1-4094)',
             'name': 'VLAN name',
         }
 
 
-class ServiceCSVForm(CustomFieldModelCSVForm):
+class ServiceTemplateCSVForm(NetBoxModelCSVForm):
+    protocol = CSVChoiceField(
+        choices=ServiceProtocolChoices,
+        help_text='IP protocol'
+    )
+
+    class Meta:
+        model = ServiceTemplate
+        fields = ('name', 'protocol', 'ports', 'description')
+
+
+class ServiceCSVForm(NetBoxModelCSVForm):
     device = CSVModelChoiceField(
         queryset=Device.objects.all(),
         required=False,
@@ -359,3 +428,83 @@ class ServiceCSVForm(CustomFieldModelCSVForm):
     class Meta:
         model = Service
         fields = ('device', 'virtual_machine', 'name', 'protocol', 'ports', 'description')
+
+
+class L2VPNCSVForm(NetBoxModelCSVForm):
+    tenant = CSVModelChoiceField(
+        queryset=Tenant.objects.all(),
+        required=False,
+        to_field_name='name',
+    )
+    type = CSVChoiceField(
+        choices=L2VPNTypeChoices,
+        help_text='L2VPN type'
+    )
+
+    class Meta:
+        model = L2VPN
+        fields = ('identifier', 'name', 'slug', 'type', 'description')
+
+
+class L2VPNTerminationCSVForm(NetBoxModelCSVForm):
+    l2vpn = CSVModelChoiceField(
+        queryset=L2VPN.objects.all(),
+        required=True,
+        to_field_name='name',
+        label='L2VPN',
+    )
+    device = CSVModelChoiceField(
+        queryset=Device.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text='Parent device (for interface)'
+    )
+    virtual_machine = CSVModelChoiceField(
+        queryset=VirtualMachine.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text='Parent virtual machine (for interface)'
+    )
+    interface = CSVModelChoiceField(
+        queryset=Interface.objects.none(),  # Can also refer to VMInterface
+        required=False,
+        to_field_name='name',
+        help_text='Assigned interface (device or VM)'
+    )
+    vlan = CSVModelChoiceField(
+        queryset=VLAN.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text='Assigned VLAN'
+    )
+
+    class Meta:
+        model = L2VPNTermination
+        fields = ('l2vpn', 'device', 'virtual_machine', 'interface', 'vlan')
+
+    def __init__(self, data=None, *args, **kwargs):
+        super().__init__(data, *args, **kwargs)
+
+        if data:
+
+            # Limit interface queryset by device or VM
+            if data.get('device'):
+                self.fields['interface'].queryset = Interface.objects.filter(
+                    **{f"device__{self.fields['device'].to_field_name}": data['device']}
+                )
+            elif data.get('virtual_machine'):
+                self.fields['interface'].queryset = VMInterface.objects.filter(
+                    **{f"virtual_machine__{self.fields['virtual_machine'].to_field_name}": data['virtual_machine']}
+                )
+
+    def clean(self):
+        super().clean()
+
+        if self.cleaned_data.get('device') and self.cleaned_data.get('virtual_machine'):
+            raise ValidationError('Cannot import device and VM interface terminations simultaneously.')
+        if not (self.cleaned_data.get('interface') or self.cleaned_data.get('vlan')):
+            raise ValidationError('Each termination must specify either an interface or a VLAN.')
+        if self.cleaned_data.get('interface') and self.cleaned_data.get('vlan'):
+            raise ValidationError('Cannot assign both an interface and a VLAN.')
+
+        self.instance.assigned_object = self.cleaned_data.get('interface') or self.cleaned_data.get('vlan')

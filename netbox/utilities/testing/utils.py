@@ -7,6 +7,7 @@ from django.utils.text import slugify
 
 from dcim.models import Device, DeviceRole, DeviceType, Manufacturer, Site
 from extras.models import Tag
+from virtualization.models import Cluster, ClusterType, VirtualMachine
 
 
 def post_data(data):
@@ -33,17 +34,29 @@ def post_data(data):
     return ret
 
 
-def create_test_device(name):
+def create_test_device(name, site=None, **attrs):
     """
     Convenience method for creating a Device (e.g. for component testing).
     """
-    site, _ = Site.objects.get_or_create(name='Site 1', slug='site-1')
+    if site is None:
+        site, _ = Site.objects.get_or_create(name='Site 1', slug='site-1')
     manufacturer, _ = Manufacturer.objects.get_or_create(name='Manufacturer 1', slug='manufacturer-1')
     devicetype, _ = DeviceType.objects.get_or_create(model='Device Type 1', manufacturer=manufacturer)
     devicerole, _ = DeviceRole.objects.get_or_create(name='Device Role 1', slug='device-role-1')
-    device = Device.objects.create(name=name, site=site, device_type=devicetype, device_role=devicerole)
+    device = Device.objects.create(name=name, site=site, device_type=devicetype, device_role=devicerole, **attrs)
 
     return device
+
+
+def create_test_virtualmachine(name):
+    """
+    Convenience method for creating a VirtualMachine.
+    """
+    cluster_type, _ = ClusterType.objects.get_or_create(name='Cluster Type 1', slug='cluster-type-1')
+    cluster, _ = Cluster.objects.get_or_create(name='Cluster 1', type=cluster_type)
+    virtual_machine = VirtualMachine.objects.create(name=name, cluster=cluster)
+
+    return virtual_machine
 
 
 def create_test_user(username='testuser', permissions=None):

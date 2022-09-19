@@ -139,24 +139,28 @@ class CustomLinkTest(APIViewTestCases.APIViewTestCase):
         {
             'content_type': 'dcim.site',
             'name': 'Custom Link 4',
+            'enabled': True,
             'link_text': 'Link 4',
             'link_url': 'http://example.com/?4',
         },
         {
             'content_type': 'dcim.site',
             'name': 'Custom Link 5',
+            'enabled': True,
             'link_text': 'Link 5',
             'link_url': 'http://example.com/?5',
         },
         {
             'content_type': 'dcim.site',
             'name': 'Custom Link 6',
+            'enabled': False,
             'link_text': 'Link 6',
             'link_url': 'http://example.com/?6',
         },
     ]
     bulk_update_data = {
         'new_window': True,
+        'enabled': False,
     }
 
     @classmethod
@@ -167,18 +171,21 @@ class CustomLinkTest(APIViewTestCases.APIViewTestCase):
             CustomLink(
                 content_type=site_ct,
                 name='Custom Link 1',
+                enabled=True,
                 link_text='Link 1',
                 link_url='http://example.com/?1',
             ),
             CustomLink(
                 content_type=site_ct,
                 name='Custom Link 2',
+                enabled=True,
                 link_text='Link 2',
                 link_url='http://example.com/?2',
             ),
             CustomLink(
                 content_type=site_ct,
                 name='Custom Link 3',
+                enabled=False,
                 link_text='Link 3',
                 link_url='http://example.com/?3',
             ),
@@ -608,7 +615,6 @@ class CreatedUpdatedFilterTest(APITestCase):
 
 class ContentTypeTest(APITestCase):
 
-    @override_settings(EXEMPT_VIEW_PERMISSIONS=['contenttypes.contenttype'])
     def test_list_objects(self):
         contenttype_count = ContentType.objects.count()
 
@@ -616,7 +622,6 @@ class ContentTypeTest(APITestCase):
         self.assertHttpStatus(response, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], contenttype_count)
 
-    @override_settings(EXEMPT_VIEW_PERMISSIONS=['contenttypes.contenttype'])
     def test_get_object(self):
         contenttype = ContentType.objects.first()
 

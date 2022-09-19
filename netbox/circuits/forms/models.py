@@ -1,9 +1,10 @@
 from django import forms
+from django.utils.translation import gettext as _
 
 from circuits.models import *
 from dcim.models import Region, Site, SiteGroup
-from extras.forms import CustomFieldModelForm
-from extras.models import Tag
+from ipam.models import ASN
+from netbox.forms import NetBoxModelForm
 from tenancy.forms import TenancyForm
 from utilities.forms import (
     BootstrapMixin, CommentField, DatePicker, DynamicModelChoiceField, DynamicModelMultipleChoiceField,
@@ -19,23 +20,25 @@ __all__ = (
 )
 
 
-class ProviderForm(BootstrapMixin, CustomFieldModelForm):
+class ProviderForm(NetBoxModelForm):
     slug = SlugField()
-    comments = CommentField()
-    tags = DynamicModelMultipleChoiceField(
-        queryset=Tag.objects.all(),
+    asns = DynamicModelMultipleChoiceField(
+        queryset=ASN.objects.all(),
+        label=_('ASNs'),
         required=False
+    )
+    comments = CommentField()
+
+    fieldsets = (
+        ('Provider', ('name', 'slug', 'asn', 'asns', 'tags')),
+        ('Support Info', ('account', 'portal_url', 'noc_contact', 'admin_contact')),
     )
 
     class Meta:
         model = Provider
         fields = [
-            'name', 'slug', 'asn', 'account', 'portal_url', 'noc_contact', 'admin_contact', 'comments', 'tags',
+            'name', 'slug', 'asn', 'account', 'portal_url', 'noc_contact', 'admin_contact', 'asns', 'comments', 'tags',
         ]
-        fieldsets = (
-            ('Provider', ('name', 'slug', 'asn', 'tags')),
-            ('Support Info', ('account', 'portal_url', 'noc_contact', 'admin_contact')),
-        )
         widgets = {
             'noc_contact': SmallTextarea(
                 attrs={'rows': 5}
@@ -53,37 +56,34 @@ class ProviderForm(BootstrapMixin, CustomFieldModelForm):
         }
 
 
-class ProviderNetworkForm(BootstrapMixin, CustomFieldModelForm):
+class ProviderNetworkForm(NetBoxModelForm):
     provider = DynamicModelChoiceField(
         queryset=Provider.objects.all()
     )
     comments = CommentField()
-    tags = DynamicModelMultipleChoiceField(
-        queryset=Tag.objects.all(),
-        required=False
+
+    fieldsets = (
+        ('Provider Network', ('provider', 'name', 'service_id', 'description', 'tags')),
     )
 
     class Meta:
         model = ProviderNetwork
         fields = [
-            'provider', 'name', 'description', 'comments', 'tags',
+            'provider', 'name', 'service_id', 'description', 'comments', 'tags',
         ]
-        fieldsets = (
-            ('Provider Network', ('provider', 'name', 'description', 'tags')),
-        )
 
 
-class CircuitTypeForm(BootstrapMixin, CustomFieldModelForm):
+class CircuitTypeForm(NetBoxModelForm):
     slug = SlugField()
 
     class Meta:
         model = CircuitType
         fields = [
-            'name', 'slug', 'description',
+            'name', 'slug', 'description', 'tags',
         ]
 
 
-class CircuitForm(BootstrapMixin, TenancyForm, CustomFieldModelForm):
+class CircuitForm(TenancyForm, NetBoxModelForm):
     provider = DynamicModelChoiceField(
         queryset=Provider.objects.all()
     )
@@ -91,21 +91,19 @@ class CircuitForm(BootstrapMixin, TenancyForm, CustomFieldModelForm):
         queryset=CircuitType.objects.all()
     )
     comments = CommentField()
-    tags = DynamicModelMultipleChoiceField(
-        queryset=Tag.objects.all(),
-        required=False
+
+    fieldsets = (
+        ('Circuit', ('provider', 'cid', 'type', 'status', 'description', 'tags')),
+        ('Service Parameters', ('install_date', 'termination_date', 'commit_rate')),
+        ('Tenancy', ('tenant_group', 'tenant')),
     )
 
     class Meta:
         model = Circuit
         fields = [
-            'cid', 'type', 'provider', 'status', 'install_date', 'commit_rate', 'description', 'tenant_group', 'tenant',
-            'comments', 'tags',
+            'cid', 'type', 'provider', 'status', 'install_date', 'termination_date', 'commit_rate', 'description',
+            'tenant_group', 'tenant', 'comments', 'tags',
         ]
-        fieldsets = (
-            ('Circuit', ('provider', 'cid', 'type', 'status', 'install_date', 'commit_rate', 'description', 'tags')),
-            ('Tenancy', ('tenant_group', 'tenant')),
-        )
         help_texts = {
             'cid': "Unique circuit ID",
             'commit_rate': "Committed rate",
@@ -113,11 +111,25 @@ class CircuitForm(BootstrapMixin, TenancyForm, CustomFieldModelForm):
         widgets = {
             'status': StaticSelect(),
             'install_date': DatePicker(),
+            'termination_date': DatePicker(),
             'commit_rate': SelectSpeedWidget(),
         }
 
 
-class CircuitTerminationForm(BootstrapMixin, forms.ModelForm):
+class CircuitTerminationForm(NetBoxModelForm):
+    provider = DynamicModelChoiceField(
+        queryset=Provider.objects.all(),
+        required=False,
+        initial_params={
+            'circuits': '$circuit'
+        }
+    )
+    circuit = DynamicModelChoiceField(
+        queryset=Circuit.objects.all(),
+        query_params={
+            'provider_id': '$provider',
+        },
+    )
     region = DynamicModelChoiceField(
         queryset=Region.objects.all(),
         required=False,
@@ -148,8 +160,8 @@ class CircuitTerminationForm(BootstrapMixin, forms.ModelForm):
     class Meta:
         model = CircuitTermination
         fields = [
-            'term_side', 'region', 'site_group', 'site', 'provider_network', 'mark_connected', 'port_speed',
-            'upstream_speed', 'xconnect_id', 'pp_info', 'description',
+            'provider', 'circuit', 'term_side', 'region', 'site_group', 'site', 'provider_network', 'mark_connected',
+            'port_speed', 'upstream_speed', 'xconnect_id', 'pp_info', 'description', 'tags',
         ]
         help_texts = {
             'port_speed': "Physical circuit speed",
@@ -157,12 +169,7 @@ class CircuitTerminationForm(BootstrapMixin, forms.ModelForm):
             'pp_info': "Patch panel ID and port number(s)"
         }
         widgets = {
-            'term_side': forms.HiddenInput(),
+            'term_side': StaticSelect(),
             'port_speed': SelectSpeedWidget(),
             'upstream_speed': SelectSpeedWidget(),
         }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.fields['provider_network'].widget.add_query_param('provider_id', self.instance.circuit.provider_id)

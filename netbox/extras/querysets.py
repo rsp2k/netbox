@@ -19,11 +19,13 @@ class ConfigContextQuerySet(RestrictedQuerySet):
         # `device_role` for Device; `role` for VirtualMachine
         role = getattr(obj, 'device_role', None) or obj.role
 
-        # Device type assignment is relevant only for Devices
+        # Device type and location assignment is relevant only for Devices
         device_type = getattr(obj, 'device_type', None)
+        location = getattr(obj, 'location', None)
 
-        # Cluster assignment is relevant only for VirtualMachines
+        # Get assigned cluster, group, and type (if any)
         cluster = getattr(obj, 'cluster', None)
+        cluster_type = getattr(cluster, 'type', None)
         cluster_group = getattr(cluster, 'group', None)
 
         # Get the group of the assigned tenant, if any
@@ -41,9 +43,11 @@ class ConfigContextQuerySet(RestrictedQuerySet):
             Q(regions__in=regions) | Q(regions=None),
             Q(site_groups__in=sitegroups) | Q(site_groups=None),
             Q(sites=obj.site) | Q(sites=None),
+            Q(locations=location) | Q(locations=None),
             Q(device_types=device_type) | Q(device_types=None),
             Q(roles=role) | Q(roles=None),
             Q(platforms=obj.platform) | Q(platforms=None),
+            Q(cluster_types=cluster_type) | Q(cluster_types=None),
             Q(cluster_groups=cluster_group) | Q(cluster_groups=None),
             Q(clusters=cluster) | Q(clusters=None),
             Q(tenant_groups=tenant_group) | Q(tenant_groups=None),
@@ -67,11 +71,8 @@ class ConfigContextModelQuerySet(RestrictedQuerySet):
     Includes a method which appends an annotation of aggregated config context JSON data objects. This is
     implemented as a subquery which performs all the joins necessary to filter relevant config context objects.
     This offers a substantial performance gain over ConfigContextQuerySet.get_for_object() when dealing with
-    multiple objects.
-
-    This allows the annotation to be entirely optional.
+    multiple objects. This allows the annotation to be entirely optional.
     """
-
     def annotate_config_context_data(self):
         """
         Attach the subquery annotation to the base queryset
@@ -83,7 +84,7 @@ class ConfigContextModelQuerySet(RestrictedQuerySet):
                     self._get_config_context_filters()
                 ).annotate(
                     _data=EmptyGroupByJSONBAgg('data', ordering=['weight', 'name'])
-                ).values("_data")
+                ).values("_data").order_by()
             )
         ).distinct()
 
@@ -96,6 +97,7 @@ class ConfigContextModelQuerySet(RestrictedQuerySet):
         }
         base_query = Q(
             Q(platforms=OuterRef('platform')) | Q(platforms=None),
+            Q(cluster_types=OuterRef('cluster__type')) | Q(cluster_types=None),
             Q(cluster_groups=OuterRef('cluster__group')) | Q(cluster_groups=None),
             Q(clusters=OuterRef('cluster')) | Q(clusters=None),
             Q(tenant_groups=OuterRef('tenant__group')) | Q(tenant_groups=None),
@@ -114,6 +116,7 @@ class ConfigContextModelQuerySet(RestrictedQuerySet):
         )
 
         if self.model._meta.model_name == 'device':
+            base_query.add((Q(locations=OuterRef('location')) | Q(locations=None)), Q.AND)
             base_query.add((Q(device_types=OuterRef('device_type')) | Q(device_types=None)), Q.AND)
             base_query.add((Q(roles=OuterRef('device_role')) | Q(roles=None)), Q.AND)
             base_query.add((Q(sites=OuterRef('site')) | Q(sites=None)), Q.AND)
@@ -123,6 +126,7 @@ class ConfigContextModelQuerySet(RestrictedQuerySet):
         elif self.model._meta.model_name == 'virtualmachine':
             base_query.add((Q(roles=OuterRef('role')) | Q(roles=None)), Q.AND)
             base_query.add((Q(sites=OuterRef('cluster__site')) | Q(sites=None)), Q.AND)
+            base_query.add(Q(device_types=None), Q.AND)
             region_field = 'cluster__site__region'
             sitegroup_field = 'cluster__site__group'
 

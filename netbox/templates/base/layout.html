@@ -1,9 +1,16 @@
 {# Base layout for the core NetBox UI w/navbar and page content #}
 {% extends 'base/base.html' %}
 {% load helpers %}
-{% load nav %}
-{% load search_options %}
+{% load search %}
 {% load static %}
+
+{% comment %}
+Blocks:
+  header: Page header
+  tabs: Horizontal navigation tabs
+  content: Page content
+  modals: Bootstrap 5 modal components
+{% endcomment %}
 
 {% block layout %}
 
@@ -21,7 +28,7 @@
         </div>
 
         {# Top bar #}
-        <nav class="navbar navbar-light sticky-top flex-md-nowrap ps-6 p-3 search container-fluid noprint">
+        <nav class="navbar navbar-light sticky-top flex-md-nowrap p-1 mb-3 search container-fluid noprint">
 
             {# Mobile Navigation #}
             <div class="nav-mobile">
@@ -34,7 +41,7 @@
                 </button>
               </div>
               <div class="d-flex my-1 flex-grow-1 justify-content-center w-100">
-                {% search_options %}
+                {% search_options request %}
               </div>
             </div>
 
@@ -46,7 +53,7 @@
 
               {# Search bar #}
               <div class="col-6 d-flex flex-grow-1 justify-content-center">
-                {% search_options %}
+                {% search_options request %}
               </div>
 
               {# Proflie/login button #}
@@ -58,13 +65,13 @@
 
         </nav>
 
-        {% if settings.BANNER_TOP %}
-          <div class="alert alert-info text-center mx-3" role="alert">
-            {{ settings.BANNER_TOP|safe }}
+        {% if config.BANNER_TOP %}
+          <div class="text-center mx-3">
+            {{ config.BANNER_TOP|safe }}
           </div>
         {% endif %}
 
-        {% if settings.MAINTENANCE_MODE %}
+        {% if config.MAINTENANCE_MODE %}
           <div class="alert alert-warning text-center mx-3" role="alert">
             <h4><i class="mdi mdi-alert"></i> Maintenance Mode</h4>
             <span>NetBox is currently in maintenance mode. Functionality may be limited.</span>
@@ -98,60 +105,65 @@
           {% endblock %}
         </div>
 
-        {% if settings.BANNER_BOTTOM %}
-          <div class="alert alert-info text-center mx-3" role="alert">
-            {{ settings.BANNER_BOTTOM|safe }}
+        {% if config.BANNER_BOTTOM %}
+          <div class="text-center mx-3">
+            {{ config.BANNER_BOTTOM|safe }}
           </div>
         {% endif %}
 
+        {# BS5 pop-up modals #}
+        {% block modals %}{% endblock %}
+
         {# Page footer #}
         <footer class="footer container-fluid">
-          <div class="row align-items-center justify-content-between mx-0">
+          {% block footer %}
+            <div class="row align-items-center justify-content-between mx-0">
 
-            {# Docs & Community Links #}
-            <div class="col-sm-12 col-md-auto fs-4 noprint">
-              <nav class="nav justify-content-center justify-content-lg-start">
-                {# Documentation #}
-                <a type="button" class="nav-link" href="{% static 'docs/' %}" target="_blank">
-                  <i title="Docs" class="mdi mdi-book-open-variant text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
-                </a>
+              <div class="col-sm-12 col-md-auto fs-4 noprint">
+                <nav class="nav justify-content-center justify-content-lg-start">
+                  {% block footer_links %}
+                    {# Documentation #}
+                    <a type="button" class="nav-link" href="{% static 'docs/' %}" target="_blank">
+                      <i title="Docs" class="mdi mdi-book-open-variant text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
+                    </a>
 
-                {# REST API #}
-                <a type="button" class="nav-link" href="{% url 'api-root' %}" target="_blank">
-                  <i title="REST API" class="mdi mdi-cloud-braces text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
-                </a>
+                    {# REST API #}
+                    <a type="button" class="nav-link" href="{% url 'api-root' %}" target="_blank">
+                      <i title="REST API" class="mdi mdi-cloud-braces text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
+                    </a>
 
-                {# API docs #}
-                <a type="button" class="nav-link" href="{% url 'api_docs' %}" target="_blank">
-                  <i title="REST API documentation" class="mdi mdi-book text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
-                </a>
+                    {# API docs #}
+                    <a type="button" class="nav-link" href="{% url 'api_docs' %}" target="_blank">
+                      <i title="REST API documentation" class="mdi mdi-book text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
+                    </a>
 
-                {# GraphQL API #}
-                {% if settings.GRAPHQL_ENABLED %}
-                  <a type="button" class="nav-link" href="{% url 'graphql' %}" target="_blank">
-                    <i title="GraphQL API" class="mdi mdi-graphql text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
-                  </a>
-                {% endif %}
+                    {# GraphQL API #}
+                    {% if config.GRAPHQL_ENABLED %}
+                    <a type="button" class="nav-link" href="{% url 'graphql' %}" target="_blank">
+                      <i title="GraphQL API" class="mdi mdi-graphql text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
+                    </a>
+                    {% endif %}
 
-                {# GitHub #}
-                <a type="button" class="nav-link" href="https://github.com/netbox-community/netbox" target="_blank">
-                  <i title="Source Code" class="mdi mdi-github text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
-                </a>
+                    {# GitHub #}
+                    <a type="button" class="nav-link" href="https://github.com/netbox-community/netbox" target="_blank">
+                      <i title="Source Code" class="mdi mdi-github text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
+                    </a>
 
-                {# NetDev Slack #}
-                <a type="button" class="nav-link" href="https://netdev.chat/" target="_blank">
-                  <i title="Community" class="mdi mdi-slack text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
-                </a>
-              </nav>
+                    {# NetDev Slack #}
+                    <a type="button" class="nav-link" href="https://netdev.chat/" target="_blank">
+                      <i title="Community" class="mdi mdi-slack text-primary" data-bs-placement="top" data-bs-toggle="tooltip"></i>
+                    </a>
+                  {% endblock footer_links %}
+                </nav>
+              </div>
+
+              <div class="col-sm-12 col-md-auto text-center text-lg-end text-muted">
+                <span class="d-block d-md-inline">{% annotated_now %} {% now 'T' %}</span>
+                <span class="ms-md-3 d-block d-md-inline">{{ settings.HOSTNAME }} (v{{ settings.VERSION }})</span>
+              </div>
+
             </div>
-
-            {# System Info #}
-            <div class="col-sm-12 col-md-auto text-center text-lg-end text-muted">
-              <span class="d-block d-md-inline">{% annotated_now %} {% now 'T' %}</span>
-              <span class="ms-md-3 d-block d-md-inline">{{ settings.HOSTNAME }} (v{{ settings.VERSION }})</span>
-            </div>
-
-          </div>
+          {% endblock footer %}
         </footer>
 
       </div>

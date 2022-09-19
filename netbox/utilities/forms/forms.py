@@ -13,13 +13,18 @@ __all__ = (
     'BulkRenameForm',
     'ConfirmationForm',
     'CSVModelForm',
+    'FilterForm',
     'ImportForm',
     'ReturnURLForm',
     'TableConfigForm',
 )
 
 
-class BootstrapMixin(forms.BaseForm):
+#
+# Mixins
+#
+
+class BootstrapMixin:
     """
     Add the base Bootstrap CSS classes to form elements.
     """
@@ -59,6 +64,10 @@ class BootstrapMixin(forms.BaseForm):
                 field.widget.attrs['class'] = ' '.join((css, 'form-select')).strip()
 
 
+#
+# Form classes
+#
+
 class ReturnURLForm(forms.Form):
     """
     Provides a hidden return URL field to control where the user is directed after the form is submitted.
@@ -73,19 +82,11 @@ class ConfirmationForm(BootstrapMixin, ReturnURLForm):
     confirm = forms.BooleanField(required=True, widget=forms.HiddenInput(), initial=True)
 
 
-class BulkEditForm(forms.Form):
+class BulkEditForm(BootstrapMixin, forms.Form):
     """
-    Base form for editing multiple objects in bulk
+    Provides bulk edit support for objects.
     """
-
-    def __init__(self, model, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.model = model
-        self.nullable_fields = []
-
-        # Copy any nullable fields defined in Meta
-        if hasattr(self.Meta, 'nullable_fields'):
-            self.nullable_fields = self.Meta.nullable_fields
+    nullable_fields = ()
 
 
 class BulkRenameForm(BootstrapMixin, forms.Form):
@@ -93,7 +94,9 @@ class BulkRenameForm(BootstrapMixin, forms.Form):
     An extendable form to be used for renaming objects in bulk.
     """
     find = forms.CharField()
-    replace = forms.CharField()
+    replace = forms.CharField(
+        required=False
+    )
     use_regex = forms.BooleanField(
         required=False,
         initial=True,
@@ -133,7 +136,7 @@ class ImportForm(BootstrapMixin, forms.Form):
     Generic form for creating an object from JSON/YAML data
     """
     data = forms.CharField(
-        widget=forms.Textarea,
+        widget=forms.Textarea(attrs={'class': 'font-monospace'}),
         help_text="Enter object data in JSON or YAML format. Note: Only a single object/document is supported."
     )
     format = forms.ChoiceField(
@@ -175,6 +178,16 @@ class ImportForm(BootstrapMixin, forms.Form):
                 raise forms.ValidationError({
                     'data': "Invalid YAML data: {}".format(err)
                 })
+
+
+class FilterForm(BootstrapMixin, forms.Form):
+    """
+    Base Form class for FilterSet forms.
+    """
+    q = forms.CharField(
+        required=False,
+        label='Search'
+    )
 
 
 class TableConfigForm(BootstrapMixin, forms.Form):

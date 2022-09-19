@@ -3,11 +3,11 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Q
 
-from dcim.models import DeviceRole, DeviceType, Platform, Region, Site, SiteGroup
-from netbox.filtersets import BaseFilterSet, ChangeLoggedModelFilterSet
+from dcim.models import DeviceRole, DeviceType, Location, Platform, Region, Site, SiteGroup
+from netbox.filtersets import BaseFilterSet, ChangeLoggedModelFilterSet, NetBoxModelFilterSet
 from tenancy.models import Tenant, TenantGroup
 from utilities.filters import ContentTypeFilter, MultiValueCharFilter, MultiValueNumberFilter
-from virtualization.models import Cluster, ClusterGroup
+from virtualization.models import Cluster, ClusterGroup, ClusterType
 from .choices import *
 from .models import *
 
@@ -26,15 +26,15 @@ __all__ = (
     'WebhookFilterSet',
 )
 
-EXACT_FILTER_TYPES = (
-    CustomFieldTypeChoices.TYPE_BOOLEAN,
-    CustomFieldTypeChoices.TYPE_DATE,
-    CustomFieldTypeChoices.TYPE_INTEGER,
-    CustomFieldTypeChoices.TYPE_SELECT,
-)
-
 
 class WebhookFilterSet(BaseFilterSet):
+    q = django_filters.CharFilter(
+        method='search',
+        label='Search',
+    )
+    content_type_id = MultiValueNumberFilter(
+        field_name='content_types__id'
+    )
     content_types = ContentTypeFilter()
     http_method = django_filters.MultipleChoiceFilter(
         choices=WebhookHttpMethodChoices
@@ -43,34 +43,97 @@ class WebhookFilterSet(BaseFilterSet):
     class Meta:
         model = Webhook
         fields = [
-            'id', 'content_types', 'name', 'type_create', 'type_update', 'type_delete', 'payload_url', 'enabled',
-            'http_method', 'http_content_type', 'secret', 'ssl_verification', 'ca_file_path',
+            'id', 'name', 'type_create', 'type_update', 'type_delete', 'payload_url', 'enabled', 'http_method',
+            'http_content_type', 'secret', 'ssl_verification', 'ca_file_path',
         ]
+
+    def search(self, queryset, name, value):
+        if not value.strip():
+            return queryset
+        return queryset.filter(
+            Q(name__icontains=value) |
+            Q(payload_url__icontains=value)
+        )
 
 
 class CustomFieldFilterSet(BaseFilterSet):
+    q = django_filters.CharFilter(
+        method='search',
+        label='Search',
+    )
+    type = django_filters.MultipleChoiceFilter(
+        choices=CustomFieldTypeChoices
+    )
+    content_type_id = MultiValueNumberFilter(
+        field_name='content_types__id'
+    )
     content_types = ContentTypeFilter()
 
     class Meta:
         model = CustomField
-        fields = ['id', 'content_types', 'name', 'required', 'filter_logic', 'weight']
+        fields = [
+            'id', 'content_types', 'name', 'group_name', 'required', 'filter_logic', 'ui_visibility', 'weight',
+            'description',
+        ]
+
+    def search(self, queryset, name, value):
+        if not value.strip():
+            return queryset
+        return queryset.filter(
+            Q(name__icontains=value) |
+            Q(label__icontains=value) |
+            Q(group_name__icontains=value) |
+            Q(description__icontains=value)
+        )
 
 
 class CustomLinkFilterSet(BaseFilterSet):
+    q = django_filters.CharFilter(
+        method='search',
+        label='Search',
+    )
 
     class Meta:
         model = CustomLink
-        fields = ['id', 'content_type', 'name', 'link_text', 'link_url', 'weight', 'group_name', 'new_window']
+        fields = [
+            'id', 'content_type', 'name', 'enabled', 'link_text', 'link_url', 'weight', 'group_name', 'new_window',
+        ]
+
+    def search(self, queryset, name, value):
+        if not value.strip():
+            return queryset
+        return queryset.filter(
+            Q(name__icontains=value) |
+            Q(link_text__icontains=value) |
+            Q(link_url__icontains=value) |
+            Q(group_name__icontains=value)
+        )
 
 
 class ExportTemplateFilterSet(BaseFilterSet):
+    q = django_filters.CharFilter(
+        method='search',
+        label='Search',
+    )
 
     class Meta:
         model = ExportTemplate
-        fields = ['id', 'content_type', 'name']
+        fields = ['id', 'content_type', 'name', 'description']
+
+    def search(self, queryset, name, value):
+        if not value.strip():
+            return queryset
+        return queryset.filter(
+            Q(name__icontains=value) |
+            Q(description__icontains=value)
+        )
 
 
 class ImageAttachmentFilterSet(BaseFilterSet):
+    q = django_filters.CharFilter(
+        method='search',
+        label='Search',
+    )
     created = django_filters.DateTimeFilter()
     content_type = ContentTypeFilter()
 
@@ -78,12 +141,13 @@ class ImageAttachmentFilterSet(BaseFilterSet):
         model = ImageAttachment
         fields = ['id', 'content_type_id', 'object_id', 'name']
 
+    def search(self, queryset, name, value):
+        if not value.strip():
+            return queryset
+        return queryset.filter(name__icontains=value)
 
-class JournalEntryFilterSet(ChangeLoggedModelFilterSet):
-    q = django_filters.CharFilter(
-        method='search',
-        label='Search',
-    )
+
+class JournalEntryFilterSet(NetBoxModelFilterSet):
     created = django_filters.DateTimeFromToRangeFilter()
     assigned_object_type = ContentTypeFilter()
     created_by_id = django_filters.ModelMultipleChoiceFilter(
@@ -124,14 +188,15 @@ class TagFilterSet(ChangeLoggedModelFilterSet):
 
     class Meta:
         model = Tag
-        fields = ['id', 'name', 'slug', 'color']
+        fields = ['id', 'name', 'slug', 'color', 'description']
 
     def search(self, queryset, name, value):
         if not value.strip():
             return queryset
         return queryset.filter(
             Q(name__icontains=value) |
-            Q(slug__icontains=value)
+            Q(slug__icontains=value) |
+            Q(description__icontains=value)
         )
 
     def _content_type(self, queryset, name, values):
@@ -199,6 +264,17 @@ class ConfigContextFilterSet(ChangeLoggedModelFilterSet):
         to_field_name='slug',
         label='Site (slug)',
     )
+    location_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='locations',
+        queryset=Location.objects.all(),
+        label='Location',
+    )
+    location = django_filters.ModelMultipleChoiceFilter(
+        field_name='locations__slug',
+        queryset=Location.objects.all(),
+        to_field_name='slug',
+        label='Location (slug)',
+    )
     device_type_id = django_filters.ModelMultipleChoiceFilter(
         field_name='device_types',
         queryset=DeviceType.objects.all(),
@@ -225,6 +301,17 @@ class ConfigContextFilterSet(ChangeLoggedModelFilterSet):
         queryset=Platform.objects.all(),
         to_field_name='slug',
         label='Platform (slug)',
+    )
+    cluster_type_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='cluster_types',
+        queryset=ClusterType.objects.all(),
+        label='Cluster type',
+    )
+    cluster_type = django_filters.ModelMultipleChoiceFilter(
+        field_name='cluster_types__slug',
+        queryset=ClusterType.objects.all(),
+        to_field_name='slug',
+        label='Cluster type (slug)',
     )
     cluster_group_id = django_filters.ModelMultipleChoiceFilter(
         field_name='cluster_groups',
@@ -263,6 +350,11 @@ class ConfigContextFilterSet(ChangeLoggedModelFilterSet):
         queryset=Tenant.objects.all(),
         to_field_name='slug',
         label='Tenant (slug)',
+    )
+    tag_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='tags',
+        queryset=Tag.objects.all(),
+        label='Tag',
     )
     tag = django_filters.ModelMultipleChoiceFilter(
         field_name='tags__slug',

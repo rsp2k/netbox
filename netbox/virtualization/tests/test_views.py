@@ -4,8 +4,8 @@ from netaddr import EUI
 
 from dcim.choices import InterfaceModeChoices
 from dcim.models import DeviceRole, Platform, Site
-from ipam.models import VLAN
-from utilities.testing import ViewTestCases, create_tags
+from ipam.models import VLAN, VRF
+from utilities.testing import ViewTestCases, create_tags, create_test_device
 from virtualization.choices import *
 from virtualization.models import Cluster, ClusterGroup, ClusterType, VirtualMachine, VMInterface
 
@@ -22,10 +22,13 @@ class ClusterGroupTestCase(ViewTestCases.OrganizationalObjectViewTestCase):
             ClusterGroup(name='Cluster Group 3', slug='cluster-group-3'),
         ])
 
+        tags = create_tags('Alpha', 'Bravo', 'Charlie')
+
         cls.form_data = {
             'name': 'Cluster Group X',
             'slug': 'cluster-group-x',
             'description': 'A new cluster group',
+            'tags': [t.pk for t in tags],
         }
 
         cls.csv_data = (
@@ -52,10 +55,13 @@ class ClusterTypeTestCase(ViewTestCases.OrganizationalObjectViewTestCase):
             ClusterType(name='Cluster Type 3', slug='cluster-type-3'),
         ])
 
+        tags = create_tags('Alpha', 'Bravo', 'Charlie')
+
         cls.form_data = {
             'name': 'Cluster Type X',
             'slug': 'cluster-type-x',
             'description': 'A new cluster type',
+            'tags': [t.pk for t in tags],
         }
 
         cls.csv_data = (
@@ -95,9 +101,9 @@ class ClusterTestCase(ViewTestCases.PrimaryObjectViewTestCase):
         ClusterType.objects.bulk_create(clustertypes)
 
         Cluster.objects.bulk_create([
-            Cluster(name='Cluster 1', group=clustergroups[0], type=clustertypes[0], site=sites[0]),
-            Cluster(name='Cluster 2', group=clustergroups[0], type=clustertypes[0], site=sites[0]),
-            Cluster(name='Cluster 3', group=clustergroups[0], type=clustertypes[0], site=sites[0]),
+            Cluster(name='Cluster 1', group=clustergroups[0], type=clustertypes[0], status=ClusterStatusChoices.STATUS_ACTIVE, site=sites[0]),
+            Cluster(name='Cluster 2', group=clustergroups[0], type=clustertypes[0], status=ClusterStatusChoices.STATUS_ACTIVE, site=sites[0]),
+            Cluster(name='Cluster 3', group=clustergroups[0], type=clustertypes[0], status=ClusterStatusChoices.STATUS_ACTIVE, site=sites[0]),
         ])
 
         tags = create_tags('Alpha', 'Bravo', 'Charlie')
@@ -106,6 +112,7 @@ class ClusterTestCase(ViewTestCases.PrimaryObjectViewTestCase):
             'name': 'Cluster X',
             'group': clustergroups[1].pk,
             'type': clustertypes[1].pk,
+            'status': ClusterStatusChoices.STATUS_OFFLINE,
             'tenant': None,
             'site': sites[1].pk,
             'comments': 'Some comments',
@@ -113,15 +120,16 @@ class ClusterTestCase(ViewTestCases.PrimaryObjectViewTestCase):
         }
 
         cls.csv_data = (
-            "name,type",
-            "Cluster 4,Cluster Type 1",
-            "Cluster 5,Cluster Type 1",
-            "Cluster 6,Cluster Type 1",
+            "name,type,status",
+            "Cluster 4,Cluster Type 1,active",
+            "Cluster 5,Cluster Type 1,active",
+            "Cluster 6,Cluster Type 1,active",
         )
 
         cls.bulk_edit_data = {
             'group': clustergroups[1].pk,
             'type': clustertypes[1].pk,
+            'status': ClusterStatusChoices.STATUS_OFFLINE,
             'tenant': None,
             'site': sites[1].pk,
             'comments': 'New comments',
@@ -160,24 +168,37 @@ class VirtualMachineTestCase(ViewTestCases.PrimaryObjectViewTestCase):
         )
         Platform.objects.bulk_create(platforms)
 
+        sites = (
+            Site(name='Site 1', slug='site-1'),
+            Site(name='Site 2', slug='site-2'),
+        )
+        Site.objects.bulk_create(sites)
+
         clustertype = ClusterType.objects.create(name='Cluster Type 1', slug='cluster-type-1')
 
         clusters = (
-            Cluster(name='Cluster 1', type=clustertype),
-            Cluster(name='Cluster 2', type=clustertype),
+            Cluster(name='Cluster 1', type=clustertype, site=sites[0]),
+            Cluster(name='Cluster 2', type=clustertype, site=sites[1]),
         )
         Cluster.objects.bulk_create(clusters)
 
+        devices = (
+            create_test_device('device1', site=sites[0], cluster=clusters[0]),
+            create_test_device('device2', site=sites[1], cluster=clusters[1]),
+        )
+
         VirtualMachine.objects.bulk_create([
-            VirtualMachine(name='Virtual Machine 1', cluster=clusters[0], role=deviceroles[0], platform=platforms[0]),
-            VirtualMachine(name='Virtual Machine 2', cluster=clusters[0], role=deviceroles[0], platform=platforms[0]),
-            VirtualMachine(name='Virtual Machine 3', cluster=clusters[0], role=deviceroles[0], platform=platforms[0]),
+            VirtualMachine(name='Virtual Machine 1', site=sites[0], cluster=clusters[0], device=devices[0], role=deviceroles[0], platform=platforms[0]),
+            VirtualMachine(name='Virtual Machine 2', site=sites[0], cluster=clusters[0], device=devices[0], role=deviceroles[0], platform=platforms[0]),
+            VirtualMachine(name='Virtual Machine 3', site=sites[0], cluster=clusters[0], device=devices[0], role=deviceroles[0], platform=platforms[0]),
         ])
 
         tags = create_tags('Alpha', 'Bravo', 'Charlie')
 
         cls.form_data = {
             'cluster': clusters[1].pk,
+            'device': devices[1].pk,
+            'site': sites[1].pk,
             'tenant': None,
             'platform': platforms[1].pk,
             'name': 'Virtual Machine X',
@@ -194,14 +215,16 @@ class VirtualMachineTestCase(ViewTestCases.PrimaryObjectViewTestCase):
         }
 
         cls.csv_data = (
-            "name,status,cluster",
-            "Virtual Machine 4,active,Cluster 1",
-            "Virtual Machine 5,active,Cluster 1",
-            "Virtual Machine 6,active,Cluster 1",
+            "name,status,site,cluster,device",
+            "Virtual Machine 4,active,Site 1,Cluster 1,device1",
+            "Virtual Machine 5,active,Site 1,Cluster 1,device1",
+            "Virtual Machine 6,active,Site 1,Cluster 1,",
         )
 
         cls.bulk_edit_data = {
+            'site': sites[1].pk,
             'cluster': clusters[1].pk,
+            'device': devices[1].pk,
             'tenant': None,
             'platform': platforms[1].pk,
             'status': VirtualMachineStatusChoices.STATUS_STAGED,
@@ -228,6 +251,7 @@ class VirtualMachineTestCase(ViewTestCases.PrimaryObjectViewTestCase):
 
 class VMInterfaceTestCase(ViewTestCases.DeviceComponentViewTestCase):
     model = VMInterface
+    validation_excluded_fields = ('name',)
 
     @classmethod
     def setUpTestData(cls):
@@ -237,15 +261,16 @@ class VMInterfaceTestCase(ViewTestCases.DeviceComponentViewTestCase):
         clustertype = ClusterType.objects.create(name='Cluster Type 1', slug='cluster-type-1')
         cluster = Cluster.objects.create(name='Cluster 1', type=clustertype, site=site)
         virtualmachines = (
-            VirtualMachine(name='Virtual Machine 1', cluster=cluster, role=devicerole),
-            VirtualMachine(name='Virtual Machine 2', cluster=cluster, role=devicerole),
+            VirtualMachine(name='Virtual Machine 1', site=site, cluster=cluster, role=devicerole),
+            VirtualMachine(name='Virtual Machine 2', site=site, cluster=cluster, role=devicerole),
         )
         VirtualMachine.objects.bulk_create(virtualmachines)
 
-        VMInterface.objects.bulk_create([
+        interfaces = VMInterface.objects.bulk_create([
             VMInterface(virtual_machine=virtualmachines[0], name='Interface 1'),
             VMInterface(virtual_machine=virtualmachines[0], name='Interface 2'),
             VMInterface(virtual_machine=virtualmachines[0], name='Interface 3'),
+            VMInterface(virtual_machine=virtualmachines[1], name='BRIDGE'),
         ])
 
         vlans = (
@@ -256,39 +281,50 @@ class VMInterfaceTestCase(ViewTestCases.DeviceComponentViewTestCase):
         )
         VLAN.objects.bulk_create(vlans)
 
+        vrfs = (
+            VRF(name='VRF 1'),
+            VRF(name='VRF 2'),
+            VRF(name='VRF 3'),
+        )
+        VRF.objects.bulk_create(vrfs)
+
         tags = create_tags('Alpha', 'Bravo', 'Charlie')
 
         cls.form_data = {
-            'virtual_machine': virtualmachines[1].pk,
+            'virtual_machine': virtualmachines[0].pk,
             'name': 'Interface X',
             'enabled': False,
+            'bridge': interfaces[1].pk,
             'mac_address': EUI('01-02-03-04-05-06'),
             'mtu': 65000,
             'description': 'New description',
             'mode': InterfaceModeChoices.MODE_TAGGED,
             'untagged_vlan': vlans[0].pk,
             'tagged_vlans': [v.pk for v in vlans[1:4]],
+            'vrf': vrfs[0].pk,
             'tags': [t.pk for t in tags],
         }
 
         cls.bulk_create_data = {
             'virtual_machine': virtualmachines[1].pk,
-            'name_pattern': 'Interface [4-6]',
+            'name': 'Interface [4-6]',
             'enabled': False,
+            'bridge': interfaces[3].pk,
             'mac_address': EUI('01-02-03-04-05-06'),
             'mtu': 2000,
             'description': 'New description',
             'mode': InterfaceModeChoices.MODE_TAGGED,
             'untagged_vlan': vlans[0].pk,
             'tagged_vlans': [v.pk for v in vlans[1:4]],
+            'vrf': vrfs[0].pk,
             'tags': [t.pk for t in tags],
         }
 
         cls.csv_data = (
-            "virtual_machine,name",
-            "Virtual Machine 2,Interface 4",
-            "Virtual Machine 2,Interface 5",
-            "Virtual Machine 2,Interface 6",
+            f"virtual_machine,name,vrf.pk",
+            f"Virtual Machine 2,Interface 4,{vrfs[0].pk}",
+            f"Virtual Machine 2,Interface 5,{vrfs[0].pk}",
+            f"Virtual Machine 2,Interface 6,{vrfs[0].pk}",
         )
 
         cls.bulk_edit_data = {

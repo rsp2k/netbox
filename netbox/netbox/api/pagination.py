@@ -1,6 +1,7 @@
-from django.conf import settings
 from django.db.models import QuerySet
 from rest_framework.pagination import LimitOffsetPagination
+
+from netbox.config import get_config
 
 
 class OptionalLimitOffsetPagination(LimitOffsetPagination):
@@ -9,11 +10,13 @@ class OptionalLimitOffsetPagination(LimitOffsetPagination):
     matching a query, but retains the same format as a paginated request. The limit can only be disabled if
     MAX_PAGE_SIZE has been set to 0 or None.
     """
+    def __init__(self):
+        self.default_limit = get_config().PAGINATE_COUNT
 
     def paginate_queryset(self, queryset, request, view=None):
 
         if isinstance(queryset, QuerySet):
-            self.count = queryset.count()
+            self.count = self.get_queryset_count(queryset)
         else:
             # We're dealing with an iterable, not a QuerySet
             self.count = len(queryset)
@@ -40,16 +43,17 @@ class OptionalLimitOffsetPagination(LimitOffsetPagination):
                 if limit < 0:
                     raise ValueError()
                 # Enforce maximum page size, if defined
-                if settings.MAX_PAGE_SIZE:
-                    if limit == 0:
-                        return settings.MAX_PAGE_SIZE
-                    else:
-                        return min(limit, settings.MAX_PAGE_SIZE)
+                MAX_PAGE_SIZE = get_config().MAX_PAGE_SIZE
+                if MAX_PAGE_SIZE:
+                    return MAX_PAGE_SIZE if limit == 0 else min(limit, MAX_PAGE_SIZE)
                 return limit
             except (KeyError, ValueError):
                 pass
 
         return self.default_limit
+
+    def get_queryset_count(self, queryset):
+        return queryset.count()
 
     def get_next_link(self):
 
@@ -66,3 +70,16 @@ class OptionalLimitOffsetPagination(LimitOffsetPagination):
             return None
 
         return super().get_previous_link()
+
+
+class StripCountAnnotationsPaginator(OptionalLimitOffsetPagination):
+    """
+    Strips the annotations on the queryset before getting the count
+    to optimize pagination of complex queries.
+    """
+    def get_queryset_count(self, queryset):
+        # Clone the queryset to avoid messing up the actual query
+        cloned_queryset = queryset.all()
+        cloned_queryset.query.annotations.clear()
+
+        return cloned_queryset.count()

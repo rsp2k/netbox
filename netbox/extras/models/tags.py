@@ -3,19 +3,20 @@ from django.urls import reverse
 from django.utils.text import slugify
 from taggit.models import TagBase, GenericTaggedItemBase
 
-from extras.utils import extras_features
-from netbox.models import BigIDModel, ChangeLoggedModel
+from netbox.models import ChangeLoggedModel
+from netbox.models.features import ExportTemplatesMixin, WebhooksMixin
 from utilities.choices import ColorChoices
 from utilities.fields import ColorField
-from utilities.querysets import RestrictedQuerySet
 
 
 #
 # Tags
 #
 
-@extras_features('webhooks')
-class Tag(ChangeLoggedModel, TagBase):
+class Tag(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel, TagBase):
+    id = models.BigAutoField(
+        primary_key=True
+    )
     color = ColorField(
         default=ColorChoices.COLOR_GREY
     )
@@ -23,8 +24,6 @@ class Tag(ChangeLoggedModel, TagBase):
         max_length=200,
         blank=True,
     )
-
-    objects = RestrictedQuerySet.as_manager()
 
     class Meta:
         ordering = ['name']
@@ -40,7 +39,7 @@ class Tag(ChangeLoggedModel, TagBase):
         return slug
 
 
-class TaggedItem(BigIDModel, GenericTaggedItemBase):
+class TaggedItem(GenericTaggedItemBase):
     tag = models.ForeignKey(
         to=Tag,
         related_name="%(app_label)s_%(class)s_items",

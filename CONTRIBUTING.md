@@ -16,13 +16,6 @@ categories for discussions:
   feature request
 * **Q&A** - Request help with installing or using NetBox
 
-### Mailing List
-
-We also have a Google Groups [mailing list](https://groups.google.com/g/netbox-discuss)
-for general discussion, however we're encouraging people to use GitHub
-discussions where possible, as it's much easier for newcomers to review past
-discussions.
-
 ### Slack
 
 For real-time chat, you can join the **#netbox** Slack channel on [NetDev Community](https://netdev.chat/).
@@ -76,14 +69,10 @@ free to add a comment with any additional justification for the feature.
 (However, note that comments with no substance other than a "+1" will be
 deleted. Please use GitHub's reactions feature to indicate your support.)
 
-* Due to a large backlog of feature requests, we are not currently accepting
-any proposals which substantially extend NetBox's functionality beyond its
-current feature set. This includes the introduction of any new views or models
-which have not already been proposed in an existing feature request.
-
-* Before filing a new feature request, consider raising your idea on the
-mailing list first. Feedback you receive there will help validate and shape the
-proposed feature before filing a formal issue.
+* Before filing a new feature request, consider raising your idea in a
+[GitHub discussion](https://github.com/netbox-community/netbox/discussions)
+first. Feedback you receive there will help validate and shape the proposed
+feature before filing a formal issue.
 
 * Good feature requests are very narrowly defined. Be sure to thoroughly
 describe the functionality and data model(s) being proposed. The more effort
@@ -110,26 +99,31 @@ appropriate labels will be applied for categorization.
 ## Submitting Pull Requests
 
 * If you're interested in contributing to NetBox, be sure to check out our
-[getting started](https://netbox.readthedocs.io/en/stable/development/getting-started/)
+[getting started](https://docs.netbox.dev/en/stable/development/getting-started/)
 documentation for tips on setting up your development environment.
 
-* Be sure to open an issue **before** starting work on a pull request, and
-discuss your idea with the NetBox maintainers before beginning work. This will
-help prevent wasting time on something that might we might not be able to
-implement. When suggesting a new feature, also make sure it won't conflict with
-any work that's already in progress.
+* Be sure to open an issue and wait for it to be assigned to you **before**
+starting work on a pull request, and discuss your idea with the NetBox
+maintainers before beginning work. This will help prevent wasting time on
+proposed changes that we might not be able to accept. When suggesting a new
+feature, also make sure it won't conflict with any work that's already in
+progress.
 
 * Once you've opened or identified an issue you'd like to work on, ask that it
-be assigned to you so that others are aware it's being worked on. A maintainer
-will then mark the issue as "accepted."
+be assigned to you so that others are aware it's being worked on. If it meets
+the acceptance criteria, a maintainer will then mark the issue as "accepted"
+and assign it to you. (Note that GitHub requires that a user first comment on
+an issue before it can be assigned to that user.)
 
-* Any pull request which does _not_ relate to an **accepted** issue will be closed.
+* Any pull request which does not relate to an **assigned** issue will be
+closed.
 
 * All new functionality must include relevant tests where applicable.
 
 * When submitting a pull request, please be sure to work off of the `develop`
 branch, rather than `master`. The `develop` branch is used for ongoing
-development, while `master` is used for tagging stable releases.
+development, while `master` is used for tagging stable releases. (If you're
+developing for the next minor release, use `feature` instead.)
 
 * In most cases, it is not necessary to add a changelog entry: A maintainer will
 take care of this when the PR is merged. (This helps avoid merge conflicts
@@ -147,8 +141,10 @@ these checks):
 
 Only comment on an issue if you are sharing a relevant idea or constructive
 feedback. **Do not** comment on an issue just to show your support (give the
-top post a :+1: instead) or ask for an ETA. These comments will be deleted to
-reduce noise in the discussion.
+top post a :+1: instead) or to ask for an update. Doing so generates
+unnecessary noise in the discussion, and is especially annoying for people who
+have subscribed to updates for the issue. Any comments without substance
+relevant to the discussion will be deleted.
 
 ## Issue Lifecycle
 
@@ -171,9 +167,9 @@ to aid in issue management.
 
 It is natural that some new issues get more attention than others. The stale
 bot helps bring renewed attention to potentially valuable issues that may have
-been overlooked. **Do not** comment on an issue that has been marked stale in
-an effort to circumvent the bot: Doing so will not remove the stale label.
-(Stale labels can be removed only by maintainers.)
+been overlooked. **Do not** comment on a stale issue merely to "bump" it in an
+effort to circumvent the bot: This will result in the immediate closure of the
+issue, and you may be barred from participating in future discussions.
 
 ## Maintainer Guidance
 
@@ -182,7 +178,7 @@ an effort to circumvent the bot: Doing so will not remove the stale label.
   the understanding that all contributions are submitted under the Apache 2.0
   license and that your employer may not make claim to any contributions.
   Contributions include code work, issue management, and community support. All
-  development must be in accordance with our [development guidance](https://netbox.readthedocs.io/en/stable/development/).
+  development must be in accordance with our [development guidance](https://docs.netbox.dev/en/stable/development/).
 
 * Maintainers are expected to attend (where feasible) our biweekly ~30-minute
   sync to review agenda items. This meeting provides opportunity to present and

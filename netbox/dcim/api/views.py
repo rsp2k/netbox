@@ -1,7 +1,5 @@
 import socket
-from collections import OrderedDict
 
-from django.conf import settings
 from django.http import Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
@@ -14,15 +12,20 @@ from rest_framework.viewsets import ViewSet
 
 from circuits.models import Circuit
 from dcim import filtersets
+from dcim.constants import CABLE_TRACE_SVG_DEFAULT_WIDTH
 from dcim.models import *
-from extras.api.views import ConfigContextQuerySetMixin, CustomFieldModelViewSet
+from dcim.svg import CableTraceSVG
+from extras.api.views import ConfigContextQuerySetMixin
 from ipam.models import Prefix, VLAN
 from netbox.api.authentication import IsAuthenticatedOrLoginNotRequired
 from netbox.api.exceptions import ServiceUnavailable
 from netbox.api.metadata import ContentTypeMetadata
-from netbox.api.views import ModelViewSet
+from netbox.api.pagination import StripCountAnnotationsPaginator
+from netbox.api.viewsets import NetBoxModelViewSet
+from netbox.config import get_config
+from netbox.constants import NESTED_SERIALIZER_PREFIX
 from utilities.api import get_serializer_for_model
-from utilities.utils import count_related, decode_dict
+from utilities.utils import count_related
 from virtualization.models import VirtualMachine
 from . import serializers
 from .exceptions import MissingFilterException
@@ -50,37 +53,30 @@ class PathEndpointMixin(object):
         # Initialize the path array
         path = []
 
+        # Render SVG image if requested
         if request.GET.get('render', None) == 'svg':
-            # Render SVG
             try:
-                width = min(int(request.GET.get('width')), 1600)
+                width = int(request.GET.get('width', CABLE_TRACE_SVG_DEFAULT_WIDTH))
             except (ValueError, TypeError):
-                width = None
-            drawing = obj.get_trace_svg(
-                base_url=request.build_absolute_uri('/'),
-                width=width
-            )
-            return HttpResponse(drawing.tostring(), content_type='image/svg+xml')
+                width = CABLE_TRACE_SVG_DEFAULT_WIDTH
+            drawing = CableTraceSVG(obj, base_url=request.build_absolute_uri('/'), width=width)
+            return HttpResponse(drawing.render().tostring(), content_type='image/svg+xml')
 
-        for near_end, cable, far_end in obj.trace():
-            if near_end is None:
-                # Split paths
+        # Serialize path objects, iterating over each three-tuple in the path
+        for near_ends, cable, far_ends in obj.trace():
+            if near_ends:
+                serializer_a = get_serializer_for_model(near_ends[0], prefix=NESTED_SERIALIZER_PREFIX)
+                near_ends = serializer_a(near_ends, many=True, context={'request': request}).data
+            else:
+                # Path is split; stop here
                 break
+            if cable:
+                cable = serializers.TracedCableSerializer(cable[0], context={'request': request}).data
+            if far_ends:
+                serializer_b = get_serializer_for_model(far_ends[0], prefix=NESTED_SERIALIZER_PREFIX)
+                far_ends = serializer_b(far_ends, many=True, context={'request': request}).data
 
-            # Serialize each object
-            serializer_a = get_serializer_for_model(near_end, prefix='Nested')
-            x = serializer_a(near_end, context={'request': request}).data
-            if cable is not None:
-                y = serializers.TracedCableSerializer(cable, context={'request': request}).data
-            else:
-                y = None
-            if far_end is not None:
-                serializer_b = get_serializer_for_model(far_end, prefix='Nested')
-                z = serializer_b(far_end, context={'request': request}).data
-            else:
-                z = None
-
-            path.append((x, y, z))
+            path.append((near_ends, cable, far_ends))
 
         return Response(path)
 
@@ -93,7 +89,7 @@ class PassThroughPortMixin(object):
         Return all CablePaths which traverse a given pass-through port.
         """
         obj = get_object_or_404(self.queryset, pk=pk)
-        cablepaths = CablePath.objects.filter(path__contains=obj).prefetch_related('origin', 'destination')
+        cablepaths = CablePath.objects.filter(_nodes__contains=obj)
         serializer = serializers.CablePathSerializer(cablepaths, context={'request': request}, many=True)
 
         return Response(serializer.data)
@@ -103,14 +99,14 @@ class PassThroughPortMixin(object):
 # Regions
 #
 
-class RegionViewSet(CustomFieldModelViewSet):
+class RegionViewSet(NetBoxModelViewSet):
     queryset = Region.objects.add_related_count(
         Region.objects.all(),
         Site,
         'region',
         'site_count',
         cumulative=True
-    )
+    ).prefetch_related('tags')
     serializer_class = serializers.RegionSerializer
     filterset_class = filtersets.RegionFilterSet
 
@@ -119,14 +115,14 @@ class RegionViewSet(CustomFieldModelViewSet):
 # Site groups
 #
 
-class SiteGroupViewSet(CustomFieldModelViewSet):
+class SiteGroupViewSet(NetBoxModelViewSet):
     queryset = SiteGroup.objects.add_related_count(
         SiteGroup.objects.all(),
         Site,
         'group',
         'site_count',
         cumulative=True
-    )
+    ).prefetch_related('tags')
     serializer_class = serializers.SiteGroupSerializer
     filterset_class = filtersets.SiteGroupFilterSet
 
@@ -135,9 +131,9 @@ class SiteGroupViewSet(CustomFieldModelViewSet):
 # Sites
 #
 
-class SiteViewSet(CustomFieldModelViewSet):
+class SiteViewSet(NetBoxModelViewSet):
     queryset = Site.objects.prefetch_related(
-        'region', 'tenant', 'tags'
+        'region', 'tenant', 'asns', 'tags'
     ).annotate(
         device_count=count_related(Device, 'site'),
         rack_count=count_related(Rack, 'site'),
@@ -154,7 +150,7 @@ class SiteViewSet(CustomFieldModelViewSet):
 # Locations
 #
 
-class LocationViewSet(CustomFieldModelViewSet):
+class LocationViewSet(NetBoxModelViewSet):
     queryset = Location.objects.add_related_count(
         Location.objects.add_related_count(
             Location.objects.all(),
@@ -167,7 +163,7 @@ class LocationViewSet(CustomFieldModelViewSet):
         'location',
         'rack_count',
         cumulative=True
-    ).prefetch_related('site')
+    ).prefetch_related('site', 'tags')
     serializer_class = serializers.LocationSerializer
     filterset_class = filtersets.LocationFilterSet
 
@@ -176,8 +172,8 @@ class LocationViewSet(CustomFieldModelViewSet):
 # Rack roles
 #
 
-class RackRoleViewSet(CustomFieldModelViewSet):
-    queryset = RackRole.objects.annotate(
+class RackRoleViewSet(NetBoxModelViewSet):
+    queryset = RackRole.objects.prefetch_related('tags').annotate(
         rack_count=count_related(Rack, 'role')
     )
     serializer_class = serializers.RackRoleSerializer
@@ -188,7 +184,7 @@ class RackRoleViewSet(CustomFieldModelViewSet):
 # Racks
 #
 
-class RackViewSet(CustomFieldModelViewSet):
+class RackViewSet(NetBoxModelViewSet):
     queryset = Rack.objects.prefetch_related(
         'site', 'location', 'role', 'tenant', 'tags'
     ).annotate(
@@ -214,6 +210,14 @@ class RackViewSet(CustomFieldModelViewSet):
         data = serializer.validated_data
 
         if data['render'] == 'svg':
+            # Determine attributes for highlighting devices (if any)
+            highlight_params = []
+            for param in request.GET.getlist('highlight'):
+                try:
+                    highlight_params.append(param.split(':', 1))
+                except ValueError:
+                    pass
+
             # Render and return the elevation as an SVG drawing with the correct content type
             drawing = rack.get_elevation_svg(
                 face=data['face'],
@@ -222,7 +226,8 @@ class RackViewSet(CustomFieldModelViewSet):
                 unit_height=data['unit_height'],
                 legend_width=data['legend_width'],
                 include_images=data['include_images'],
-                base_url=request.build_absolute_uri('/')
+                base_url=request.build_absolute_uri('/'),
+                highlight_params=highlight_params
             )
             return HttpResponse(drawing.tostring(), content_type='image/svg+xml')
 
@@ -250,7 +255,7 @@ class RackViewSet(CustomFieldModelViewSet):
 # Rack reservations
 #
 
-class RackReservationViewSet(ModelViewSet):
+class RackReservationViewSet(NetBoxModelViewSet):
     queryset = RackReservation.objects.prefetch_related('rack', 'user', 'tenant')
     serializer_class = serializers.RackReservationSerializer
     filterset_class = filtersets.RackReservationFilterSet
@@ -260,8 +265,8 @@ class RackReservationViewSet(ModelViewSet):
 # Manufacturers
 #
 
-class ManufacturerViewSet(CustomFieldModelViewSet):
-    queryset = Manufacturer.objects.annotate(
+class ManufacturerViewSet(NetBoxModelViewSet):
+    queryset = Manufacturer.objects.prefetch_related('tags').annotate(
         devicetype_count=count_related(DeviceType, 'manufacturer'),
         inventoryitem_count=count_related(InventoryItem, 'manufacturer'),
         platform_count=count_related(Platform, 'manufacturer')
@@ -271,10 +276,10 @@ class ManufacturerViewSet(CustomFieldModelViewSet):
 
 
 #
-# Device types
+# Device/module types
 #
 
-class DeviceTypeViewSet(CustomFieldModelViewSet):
+class DeviceTypeViewSet(NetBoxModelViewSet):
     queryset = DeviceType.objects.prefetch_related('manufacturer', 'tags').annotate(
         device_count=count_related(Device, 'device_type')
     )
@@ -283,64 +288,85 @@ class DeviceTypeViewSet(CustomFieldModelViewSet):
     brief_prefetch_fields = ['manufacturer']
 
 
+class ModuleTypeViewSet(NetBoxModelViewSet):
+    queryset = ModuleType.objects.prefetch_related('manufacturer', 'tags').annotate(
+        # module_count=count_related(Module, 'module_type')
+    )
+    serializer_class = serializers.ModuleTypeSerializer
+    filterset_class = filtersets.ModuleTypeFilterSet
+    brief_prefetch_fields = ['manufacturer']
+
+
 #
 # Device type components
 #
 
-class ConsolePortTemplateViewSet(ModelViewSet):
+class ConsolePortTemplateViewSet(NetBoxModelViewSet):
     queryset = ConsolePortTemplate.objects.prefetch_related('device_type__manufacturer')
     serializer_class = serializers.ConsolePortTemplateSerializer
     filterset_class = filtersets.ConsolePortTemplateFilterSet
 
 
-class ConsoleServerPortTemplateViewSet(ModelViewSet):
+class ConsoleServerPortTemplateViewSet(NetBoxModelViewSet):
     queryset = ConsoleServerPortTemplate.objects.prefetch_related('device_type__manufacturer')
     serializer_class = serializers.ConsoleServerPortTemplateSerializer
     filterset_class = filtersets.ConsoleServerPortTemplateFilterSet
 
 
-class PowerPortTemplateViewSet(ModelViewSet):
+class PowerPortTemplateViewSet(NetBoxModelViewSet):
     queryset = PowerPortTemplate.objects.prefetch_related('device_type__manufacturer')
     serializer_class = serializers.PowerPortTemplateSerializer
     filterset_class = filtersets.PowerPortTemplateFilterSet
 
 
-class PowerOutletTemplateViewSet(ModelViewSet):
+class PowerOutletTemplateViewSet(NetBoxModelViewSet):
     queryset = PowerOutletTemplate.objects.prefetch_related('device_type__manufacturer')
     serializer_class = serializers.PowerOutletTemplateSerializer
     filterset_class = filtersets.PowerOutletTemplateFilterSet
 
 
-class InterfaceTemplateViewSet(ModelViewSet):
+class InterfaceTemplateViewSet(NetBoxModelViewSet):
     queryset = InterfaceTemplate.objects.prefetch_related('device_type__manufacturer')
     serializer_class = serializers.InterfaceTemplateSerializer
     filterset_class = filtersets.InterfaceTemplateFilterSet
 
 
-class FrontPortTemplateViewSet(ModelViewSet):
+class FrontPortTemplateViewSet(NetBoxModelViewSet):
     queryset = FrontPortTemplate.objects.prefetch_related('device_type__manufacturer')
     serializer_class = serializers.FrontPortTemplateSerializer
     filterset_class = filtersets.FrontPortTemplateFilterSet
 
 
-class RearPortTemplateViewSet(ModelViewSet):
+class RearPortTemplateViewSet(NetBoxModelViewSet):
     queryset = RearPortTemplate.objects.prefetch_related('device_type__manufacturer')
     serializer_class = serializers.RearPortTemplateSerializer
     filterset_class = filtersets.RearPortTemplateFilterSet
 
 
-class DeviceBayTemplateViewSet(ModelViewSet):
+class ModuleBayTemplateViewSet(NetBoxModelViewSet):
+    queryset = ModuleBayTemplate.objects.prefetch_related('device_type__manufacturer')
+    serializer_class = serializers.ModuleBayTemplateSerializer
+    filterset_class = filtersets.ModuleBayTemplateFilterSet
+
+
+class DeviceBayTemplateViewSet(NetBoxModelViewSet):
     queryset = DeviceBayTemplate.objects.prefetch_related('device_type__manufacturer')
     serializer_class = serializers.DeviceBayTemplateSerializer
     filterset_class = filtersets.DeviceBayTemplateFilterSet
+
+
+class InventoryItemTemplateViewSet(NetBoxModelViewSet):
+    queryset = InventoryItemTemplate.objects.prefetch_related('device_type__manufacturer', 'role')
+    serializer_class = serializers.InventoryItemTemplateSerializer
+    filterset_class = filtersets.InventoryItemTemplateFilterSet
 
 
 #
 # Device roles
 #
 
-class DeviceRoleViewSet(CustomFieldModelViewSet):
-    queryset = DeviceRole.objects.annotate(
+class DeviceRoleViewSet(NetBoxModelViewSet):
+    queryset = DeviceRole.objects.prefetch_related('tags').annotate(
         device_count=count_related(Device, 'device_role'),
         virtualmachine_count=count_related(VirtualMachine, 'role')
     )
@@ -352,8 +378,8 @@ class DeviceRoleViewSet(CustomFieldModelViewSet):
 # Platforms
 #
 
-class PlatformViewSet(CustomFieldModelViewSet):
-    queryset = Platform.objects.annotate(
+class PlatformViewSet(NetBoxModelViewSet):
+    queryset = Platform.objects.prefetch_related('tags').annotate(
         device_count=count_related(Device, 'platform'),
         virtualmachine_count=count_related(VirtualMachine, 'platform')
     )
@@ -362,15 +388,16 @@ class PlatformViewSet(CustomFieldModelViewSet):
 
 
 #
-# Devices
+# Devices/modules
 #
 
-class DeviceViewSet(ConfigContextQuerySetMixin, CustomFieldModelViewSet):
+class DeviceViewSet(ConfigContextQuerySetMixin, NetBoxModelViewSet):
     queryset = Device.objects.prefetch_related(
         'device_type__manufacturer', 'device_role', 'tenant', 'platform', 'site', 'location', 'rack', 'parent_bay',
         'virtual_chassis__master', 'primary_ip4__nat_outside', 'primary_ip6__nat_outside', 'tags',
     )
     filterset_class = filtersets.DeviceFilterSet
+    pagination_class = StripCountAnnotationsPaginator
 
     def get_serializer_class(self):
         """
@@ -456,10 +483,13 @@ class DeviceViewSet(ConfigContextQuerySetMixin, CustomFieldModelViewSet):
             return HttpResponseForbidden()
 
         napalm_methods = request.GET.getlist('method')
-        response = OrderedDict([(m, None) for m in napalm_methods])
-        username = settings.NAPALM_USERNAME
-        password = settings.NAPALM_PASSWORD
-        optional_args = settings.NAPALM_ARGS.copy()
+        response = {m: None for m in napalm_methods}
+
+        config = get_config()
+        username = config.NAPALM_USERNAME
+        password = config.NAPALM_PASSWORD
+        timeout = config.NAPALM_TIMEOUT
+        optional_args = config.NAPALM_ARGS.copy()
         if device.platform.napalm_args is not None:
             optional_args.update(device.platform.napalm_args)
 
@@ -481,7 +511,7 @@ class DeviceViewSet(ConfigContextQuerySetMixin, CustomFieldModelViewSet):
             hostname=host,
             username=username,
             password=password,
-            timeout=settings.NAPALM_TIMEOUT,
+            timeout=timeout,
             optional_args=optional_args
         )
         try:
@@ -498,7 +528,7 @@ class DeviceViewSet(ConfigContextQuerySetMixin, CustomFieldModelViewSet):
                 response[method] = {'error': 'Only get_* NAPALM methods are supported'}
                 continue
             try:
-                response[method] = decode_dict(getattr(d, method)())
+                response[method] = getattr(d, method)()
             except NotImplementedError:
                 response[method] = {'error': 'Method {} not implemented for NAPALM driver {}'.format(method, driver)}
             except Exception as e:
@@ -508,95 +538,137 @@ class DeviceViewSet(ConfigContextQuerySetMixin, CustomFieldModelViewSet):
         return Response(response)
 
 
+class ModuleViewSet(NetBoxModelViewSet):
+    queryset = Module.objects.prefetch_related(
+        'device', 'module_bay', 'module_type__manufacturer', 'tags',
+    )
+    serializer_class = serializers.ModuleSerializer
+    filterset_class = filtersets.ModuleFilterSet
+
+
 #
 # Device components
 #
 
-class ConsolePortViewSet(PathEndpointMixin, ModelViewSet):
-    queryset = ConsolePort.objects.prefetch_related('device', '_path__destination', 'cable', '_cable_peer', 'tags')
+class ConsolePortViewSet(PathEndpointMixin, NetBoxModelViewSet):
+    queryset = ConsolePort.objects.prefetch_related(
+        'device', 'module__module_bay', '_path', 'cable__terminations', 'tags'
+    )
     serializer_class = serializers.ConsolePortSerializer
     filterset_class = filtersets.ConsolePortFilterSet
     brief_prefetch_fields = ['device']
 
 
-class ConsoleServerPortViewSet(PathEndpointMixin, ModelViewSet):
+class ConsoleServerPortViewSet(PathEndpointMixin, NetBoxModelViewSet):
     queryset = ConsoleServerPort.objects.prefetch_related(
-        'device', '_path__destination', 'cable', '_cable_peer', 'tags'
+        'device', 'module__module_bay', '_path', 'cable__terminations', 'tags'
     )
     serializer_class = serializers.ConsoleServerPortSerializer
     filterset_class = filtersets.ConsoleServerPortFilterSet
     brief_prefetch_fields = ['device']
 
 
-class PowerPortViewSet(PathEndpointMixin, ModelViewSet):
-    queryset = PowerPort.objects.prefetch_related('device', '_path__destination', 'cable', '_cable_peer', 'tags')
+class PowerPortViewSet(PathEndpointMixin, NetBoxModelViewSet):
+    queryset = PowerPort.objects.prefetch_related(
+        'device', 'module__module_bay', '_path', 'cable__terminations', 'tags'
+    )
     serializer_class = serializers.PowerPortSerializer
     filterset_class = filtersets.PowerPortFilterSet
     brief_prefetch_fields = ['device']
 
 
-class PowerOutletViewSet(PathEndpointMixin, ModelViewSet):
-    queryset = PowerOutlet.objects.prefetch_related('device', '_path__destination', 'cable', '_cable_peer', 'tags')
+class PowerOutletViewSet(PathEndpointMixin, NetBoxModelViewSet):
+    queryset = PowerOutlet.objects.prefetch_related(
+        'device', 'module__module_bay', '_path', 'cable__terminations', 'tags'
+    )
     serializer_class = serializers.PowerOutletSerializer
     filterset_class = filtersets.PowerOutletFilterSet
     brief_prefetch_fields = ['device']
 
 
-class InterfaceViewSet(PathEndpointMixin, ModelViewSet):
+class InterfaceViewSet(PathEndpointMixin, NetBoxModelViewSet):
     queryset = Interface.objects.prefetch_related(
-        'device', 'parent', 'lag', '_path__destination', 'cable', '_cable_peer', 'ip_addresses', 'tags'
+        'device', 'module__module_bay', 'parent', 'bridge', 'lag', '_path', 'cable__terminations', 'wireless_lans',
+        'untagged_vlan', 'tagged_vlans', 'vrf', 'ip_addresses', 'fhrp_group_assignments', 'tags'
     )
     serializer_class = serializers.InterfaceSerializer
     filterset_class = filtersets.InterfaceFilterSet
     brief_prefetch_fields = ['device']
 
 
-class FrontPortViewSet(PassThroughPortMixin, ModelViewSet):
-    queryset = FrontPort.objects.prefetch_related('device__device_type__manufacturer', 'rear_port', 'cable', 'tags')
+class FrontPortViewSet(PassThroughPortMixin, NetBoxModelViewSet):
+    queryset = FrontPort.objects.prefetch_related(
+        'device__device_type__manufacturer', 'module__module_bay', 'rear_port', 'cable__terminations', 'tags'
+    )
     serializer_class = serializers.FrontPortSerializer
     filterset_class = filtersets.FrontPortFilterSet
     brief_prefetch_fields = ['device']
 
 
-class RearPortViewSet(PassThroughPortMixin, ModelViewSet):
-    queryset = RearPort.objects.prefetch_related('device__device_type__manufacturer', 'cable', 'tags')
+class RearPortViewSet(PassThroughPortMixin, NetBoxModelViewSet):
+    queryset = RearPort.objects.prefetch_related(
+        'device__device_type__manufacturer', 'module__module_bay', 'cable__terminations', 'tags'
+    )
     serializer_class = serializers.RearPortSerializer
     filterset_class = filtersets.RearPortFilterSet
     brief_prefetch_fields = ['device']
 
 
-class DeviceBayViewSet(ModelViewSet):
-    queryset = DeviceBay.objects.prefetch_related('installed_device').prefetch_related('tags')
+class ModuleBayViewSet(NetBoxModelViewSet):
+    queryset = ModuleBay.objects.prefetch_related('tags', 'installed_module')
+    serializer_class = serializers.ModuleBaySerializer
+    filterset_class = filtersets.ModuleBayFilterSet
+    brief_prefetch_fields = ['device']
+
+
+class DeviceBayViewSet(NetBoxModelViewSet):
+    queryset = DeviceBay.objects.prefetch_related('installed_device', 'tags')
     serializer_class = serializers.DeviceBaySerializer
     filterset_class = filtersets.DeviceBayFilterSet
     brief_prefetch_fields = ['device']
 
 
-class InventoryItemViewSet(ModelViewSet):
-    queryset = InventoryItem.objects.prefetch_related('device', 'manufacturer').prefetch_related('tags')
+class InventoryItemViewSet(NetBoxModelViewSet):
+    queryset = InventoryItem.objects.prefetch_related('device', 'manufacturer', 'tags')
     serializer_class = serializers.InventoryItemSerializer
     filterset_class = filtersets.InventoryItemFilterSet
     brief_prefetch_fields = ['device']
 
 
 #
+# Device component roles
+#
+
+class InventoryItemRoleViewSet(NetBoxModelViewSet):
+    queryset = InventoryItemRole.objects.prefetch_related('tags').annotate(
+        inventoryitem_count=count_related(InventoryItem, 'role')
+    )
+    serializer_class = serializers.InventoryItemRoleSerializer
+    filterset_class = filtersets.InventoryItemRoleFilterSet
+
+
+#
 # Cables
 #
 
-class CableViewSet(ModelViewSet):
-    metadata_class = ContentTypeMetadata
-    queryset = Cable.objects.prefetch_related(
-        'termination_a', 'termination_b'
-    )
+class CableViewSet(NetBoxModelViewSet):
+    queryset = Cable.objects.prefetch_related('terminations__termination')
     serializer_class = serializers.CableSerializer
     filterset_class = filtersets.CableFilterSet
+
+
+class CableTerminationViewSet(NetBoxModelViewSet):
+    metadata_class = ContentTypeMetadata
+    queryset = CableTermination.objects.prefetch_related('cable', 'termination')
+    serializer_class = serializers.CableTerminationSerializer
+    filterset_class = filtersets.CableTerminationFilterSet
 
 
 #
 # Virtual chassis
 #
 
-class VirtualChassisViewSet(ModelViewSet):
+class VirtualChassisViewSet(NetBoxModelViewSet):
     queryset = VirtualChassis.objects.prefetch_related('tags').annotate(
         member_count=count_related(Device, 'virtual_chassis')
     )
@@ -609,7 +681,7 @@ class VirtualChassisViewSet(ModelViewSet):
 # Power panels
 #
 
-class PowerPanelViewSet(ModelViewSet):
+class PowerPanelViewSet(NetBoxModelViewSet):
     queryset = PowerPanel.objects.prefetch_related(
         'site', 'location'
     ).annotate(
@@ -623,9 +695,9 @@ class PowerPanelViewSet(ModelViewSet):
 # Power feeds
 #
 
-class PowerFeedViewSet(PathEndpointMixin, CustomFieldModelViewSet):
+class PowerFeedViewSet(PathEndpointMixin, NetBoxModelViewSet):
     queryset = PowerFeed.objects.prefetch_related(
-        'power_panel', 'rack', '_path__destination', 'cable', '_cable_peer', 'tags'
+        'power_panel', 'rack', '_path', 'cable__terminations', 'tags'
     )
     serializer_class = serializers.PowerFeedSerializer
     filterset_class = filtersets.PowerFeedFilterSet
@@ -685,13 +757,13 @@ class ConnectedDeviceViewSet(ViewSet):
             device=peer_device,
             name=peer_interface_name
         )
-        endpoint = peer_interface.connected_endpoint
+        endpoints = peer_interface.connected_endpoints
 
         # If an Interface, return the parent device
-        if type(endpoint) is Interface:
+        if endpoints and type(endpoints[0]) is Interface:
             device = get_object_or_404(
                 Device.objects.restrict(request.user, 'view'),
-                pk=endpoint.device_id
+                pk=endpoints[0].device_id
             )
             return Response(serializers.DeviceSerializer(device, context={'request': request}).data)
 

@@ -1,19 +1,55 @@
 import datetime
+import decimal
 import json
-import urllib
-from collections import OrderedDict
+from decimal import Decimal
 from itertools import count, groupby
-from typing import Any, Dict, List, Tuple
 
+import bleach
 from django.core.serializers import serialize
 from django.db.models import Count, OuterRef, Subquery
 from django.db.models.functions import Coalesce
+from django.http import QueryDict
 from jinja2.sandbox import SandboxedEnvironment
 from mptt.models import MPTTModel
 
 from dcim.choices import CableLengthUnitChoices
+from extras.plugins import PluginConfig
 from extras.utils import is_taggable
+from netbox.config import get_config
 from utilities.constants import HTTP_REQUEST_META_SAFE_COPY
+
+
+def get_viewname(model, action=None, rest_api=False):
+    """
+    Return the view name for the given model and action, if valid.
+
+    :param model: The model or instance to which the view applies
+    :param action: A string indicating the desired action (if any); e.g. "add" or "list"
+    :param rest_api: A boolean indicating whether this is a REST API view
+    """
+    is_plugin = isinstance(model._meta.app_config, PluginConfig)
+    app_label = model._meta.app_label
+    model_name = model._meta.model_name
+
+    if rest_api:
+        if is_plugin:
+            viewname = f'plugins-api:{app_label}-api:{model_name}'
+        else:
+            viewname = f'{app_label}-api:{model_name}'
+        # Append the action, if any
+        if action:
+            viewname = f'{viewname}-{action}'
+
+    else:
+        viewname = f'{app_label}:{model_name}'
+        # Prepend the plugins namespace if this is a plugin model
+        if is_plugin:
+            viewname = f'plugins:{viewname}'
+        # Append the action, if any
+        if action:
+            viewname = f'{viewname}_{action}'
+
+    return viewname
 
 
 def csv_format(data):
@@ -53,9 +89,10 @@ def foreground_color(bg_color, dark='000000', light='ffffff'):
     :param dark: RBG color code for dark text
     :param light: RBG color code for light text
     """
+    THRESHOLD = 150
     bg_color = bg_color.strip('#')
     r, g, b = [int(bg_color[c:c + 2], 16) for c in (0, 2, 4)]
-    if r * 0.299 + g * 0.587 + b * 0.114 > 186:
+    if r * 0.299 + g * 0.587 + b * 0.114 > THRESHOLD:
         return dark
     else:
         return light
@@ -111,7 +148,7 @@ def serialize_object(obj, extra=None):
     # Include any tags. Check for tags cached on the instance; fall back to using the manager.
     if is_taggable(obj):
         tags = getattr(obj, '_tags', None) or obj.tags.all()
-        data['tags'] = [tag.name for tag in tags]
+        data['tags'] = sorted([tag.name for tag in tags])
 
     # Append any extra data
     if extra is not None:
@@ -180,28 +217,43 @@ def deepmerge(original, new):
     """
     Deep merge two dictionaries (new into original) and return a new dict
     """
-    merged = OrderedDict(original)
+    merged = dict(original)
     for key, val in new.items():
-        if key in original and isinstance(original[key], dict) and isinstance(val, dict):
+        if key in original and isinstance(original[key], dict) and val and isinstance(val, dict):
             merged[key] = deepmerge(original[key], val)
         else:
             merged[key] = val
     return merged
 
 
+def drange(start, end, step=decimal.Decimal(1)):
+    """
+    Decimal-compatible implementation of Python's range()
+    """
+    start, end, step = decimal.Decimal(start), decimal.Decimal(end), decimal.Decimal(step)
+    if start < end:
+        while start < end:
+            yield start
+            start += step
+    else:
+        while start > end:
+            yield start
+            start += step
+
+
 def to_meters(length, unit):
     """
     Convert the given length to meters.
     """
-    length = int(length)
-    if length < 0:
-        raise ValueError("Length must be a positive integer")
+    try:
+        if length < 0:
+            raise ValueError("Length must be a positive number")
+    except TypeError:
+        raise TypeError(f"Invalid value '{length}' for length (must be a number)")
 
     valid_units = CableLengthUnitChoices.values()
     if unit not in valid_units:
-        raise ValueError(
-            "Unknown unit {}. Must be one of the following: {}".format(unit, ', '.join(valid_units))
-        )
+        raise ValueError(f"Unknown unit {unit}. Must be one of the following: {', '.join(valid_units)}")
 
     if unit == CableLengthUnitChoices.UNIT_KILOMETER:
         return length * 1000
@@ -210,11 +262,11 @@ def to_meters(length, unit):
     if unit == CableLengthUnitChoices.UNIT_CENTIMETER:
         return length / 100
     if unit == CableLengthUnitChoices.UNIT_MILE:
-        return length * 1609.344
+        return length * Decimal(1609.344)
     if unit == CableLengthUnitChoices.UNIT_FOOT:
-        return length * 0.3048
+        return length * Decimal(0.3048)
     if unit == CableLengthUnitChoices.UNIT_INCH:
-        return length * 0.3048 * 12
+        return length * Decimal(0.3048) * 12
     raise ValueError(f"Unknown unit {unit}. Must be 'km', 'm', 'cm', 'mi', 'ft', or 'in'.")
 
 
@@ -222,36 +274,32 @@ def render_jinja2(template_code, context):
     """
     Render a Jinja2 template with the provided context. Return the rendered content.
     """
-    return SandboxedEnvironment().from_string(source=template_code).render(**context)
+    environment = SandboxedEnvironment()
+    environment.filters.update(get_config().JINJA2_FILTERS)
+    return environment.from_string(source=template_code).render(**context)
 
 
 def prepare_cloned_fields(instance):
     """
-    Compile an object's `clone_fields` list into a string of URL query parameters. Tags are automatically cloned where
-    applicable.
+    Generate a QueryDict comprising attributes from an object's clone() method.
     """
+    # Generate the clone attributes from the instance
+    if not hasattr(instance, 'clone'):
+        return QueryDict(mutable=True)
+    attrs = instance.clone()
+
+    # Prepare querydict parameters
     params = []
-    for field_name in getattr(instance, 'clone_fields', []):
-        field = instance._meta.get_field(field_name)
-        field_value = field.value_from_object(instance)
+    for key, value in attrs.items():
+        if type(value) in (list, tuple):
+            params.extend([(key, v) for v in value])
+        elif value not in (False, None):
+            params.append((key, value))
+        else:
+            params.append((key, ''))
 
-        # Pass False as null for boolean fields
-        if field_value is False:
-            params.append((field_name, ''))
-
-        # Omit empty values
-        elif field_value not in (None, ''):
-            params.append((field_name, field_value))
-
-    # Copy tags
-    if is_taggable(instance):
-        for tag in instance.tags.all():
-            params.append(('tags', tag.pk))
-
-    # Concatenate parameters into a URL query string
-    param_string = '&'.join([f'{k}={v}' for k, v in params])
-
-    return param_string
+    # Return a QueryDict with the parameters
+    return QueryDict('&'.join([f'{k}={v}' for k, v in params]), mutable=True)
 
 
 def shallow_compare_dict(source_dict, destination_dict, exclude=None):
@@ -282,56 +330,24 @@ def flatten_dict(d, prefix='', separator='.'):
     for k, v in d.items():
         key = separator.join([prefix, k]) if prefix else k
         if type(v) is dict:
-            ret.update(flatten_dict(v, prefix=key))
+            ret.update(flatten_dict(v, prefix=key, separator=separator))
         else:
             ret[key] = v
     return ret
 
 
-def decode_dict(encoded_dict: Dict, *, decode_keys: bool = True) -> Dict:
+def array_to_ranges(array):
     """
-    Recursively URL decode string keys and values of a dict.
-
-    For example, `{'1%2F1%2F1': {'1%2F1%2F2': ['1%2F1%2F3', '1%2F1%2F4']}}` would
-    become: `{'1/1/1': {'1/1/2': ['1/1/3', '1/1/4']}}`
-
-    :param encoded_dict: Dictionary to be decoded.
-    :param decode_keys: (Optional) Enable/disable decoding of dict keys.
+    Convert an arbitrary array of integers to a list of consecutive values. Nonconsecutive values are returned as
+    single-item tuples. For example:
+        [0, 1, 2, 10, 14, 15, 16] => [(0, 2), (10,), (14, 16)]"
     """
-
-    def decode_value(value: Any, _decode_keys: bool) -> Any:
-        """
-        Handle URL decoding of any supported value type.
-        """
-        # Decode string values.
-        if isinstance(value, str):
-            return urllib.parse.unquote(value)
-        # Recursively decode each list item.
-        elif isinstance(value, list):
-            return [decode_value(v, _decode_keys) for v in value]
-        # Recursively decode each tuple item.
-        elif isinstance(value, Tuple):
-            return tuple(decode_value(v, _decode_keys) for v in value)
-        # Recursively decode each dict key/value pair.
-        elif isinstance(value, dict):
-            # Don't decode keys, if `decode_keys` is false.
-            if not _decode_keys:
-                return {k: decode_value(v, _decode_keys) for k, v in value.items()}
-            return {urllib.parse.unquote(k): decode_value(v, _decode_keys) for k, v in value.items()}
-        return value
-
-    if not decode_keys:
-        # Don't decode keys, if `decode_keys` is false.
-        return {k: decode_value(v, decode_keys) for k, v in encoded_dict.items()}
-
-    return {urllib.parse.unquote(k): decode_value(v, decode_keys) for k, v in encoded_dict.items()}
-
-
-# Taken from django.utils.functional (<3.0)
-def curry(_curried_func, *args, **kwargs):
-    def _curried(*moreargs, **morekwargs):
-        return _curried_func(*args, *moreargs, **{**kwargs, **morekwargs})
-    return _curried
+    group = (
+        list(x) for _, x in groupby(sorted(array), lambda x, c=count(): next(c) - x)
+    )
+    return [
+        (g[0], g[-1])[:len(g)] for g in group
+    ]
 
 
 def array_to_string(array):
@@ -340,20 +356,33 @@ def array_to_string(array):
     For example:
         [0, 1, 2, 10, 14, 15, 16] => "0-2, 10, 14-16"
     """
-    group = (list(x) for _, x in groupby(sorted(array), lambda x, c=count(): next(c) - x))
-    return ', '.join('-'.join(map(str, (g[0], g[-1])[:len(g)])) for g in group)
+    ret = []
+    ranges = array_to_ranges(array)
+    for value in ranges:
+        if len(value) == 1:
+            ret.append(str(value[0]))
+        else:
+            ret.append(f'{value[0]}-{value[1]}')
+    return ', '.join(ret)
 
 
-def content_type_name(contenttype):
+def content_type_name(ct):
     """
-    Return a proper ContentType name.
+    Return a human-friendly ContentType name (e.g. "DCIM > Site").
     """
     try:
-        meta = contenttype.model_class()._meta
+        meta = ct.model_class()._meta
         return f'{meta.app_config.verbose_name} > {meta.verbose_name}'
     except AttributeError:
         # Model no longer exists
-        return f'{contenttype.app_label} > {contenttype.model}'
+        return f'{ct.app_label} > {ct.model}'
+
+
+def content_type_identifier(ct):
+    """
+    Return a "raw" ContentType identifier string suitable for bulk import/export (e.g. "dcim.site").
+    """
+    return f'{ct.app_label}.{ct.model}'
 
 
 #
@@ -388,3 +417,33 @@ def copy_safe_request(request):
         'path': request.path,
         'id': getattr(request, 'id', None),  # UUID assigned by middleware
     })
+
+
+def clean_html(html, schemes):
+    """
+    Sanitizes HTML based on a whitelist of allowed tags and attributes.
+    Also takes a list of allowed URI schemes.
+    """
+
+    ALLOWED_TAGS = [
+        "div", "pre", "code", "blockquote", "del",
+        "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+        "ul", "ol", "li", "p", "br",
+        "strong", "em", "a", "b", "i", "img",
+        "table", "thead", "tbody", "tr", "th", "td",
+        "dl", "dt", "dd",
+    ]
+
+    ALLOWED_ATTRIBUTES = {
+        "div": ['class'],
+        "h1": ["id"], "h2": ["id"], "h3": ["id"], "h4": ["id"], "h5": ["id"], "h6": ["id"],
+        "a": ["href", "title"],
+        "img": ["src", "title", "alt"],
+    }
+
+    return bleach.clean(
+        html,
+        tags=ALLOWED_TAGS,
+        attributes=ALLOWED_ATTRIBUTES,
+        protocols=schemes
+    )

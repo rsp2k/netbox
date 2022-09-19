@@ -1,7 +1,6 @@
 import re
 
 from django import forms
-from django.conf import settings
 from django.forms.models import fields_for_model
 
 from utilities.choices import unpack_grouped_choices
@@ -127,12 +126,13 @@ def get_selected_values(form, field_name):
     if not hasattr(field, 'choices'):
         return [str(filter_data)]
 
-    # Get choice labels
+    # Model choice field
     if type(field.choices) is forms.models.ModelChoiceIterator:
-        # Field uses dynamic choices: show all that have been populated on the widget
-        values = [
-            subwidget.choice_label for subwidget in form[field_name].subwidgets
-        ]
+        # If this is a single-choice field, wrap its value in a list
+        if not hasattr(filter_data, '__iter__'):
+            values = [filter_data]
+        else:
+            values = filter_data
 
     else:
         # Static selection field
@@ -143,11 +143,11 @@ def get_selected_values(form, field_name):
             label for value, label in choices if str(value) in filter_data or None in filter_data
         ]
 
-    if hasattr(field, 'null_option'):
-        # If the field has a `null_option` attribute set and it is selected,
-        # add it to the field's grouped choices.
-        if field.null_option is not None and None in filter_data:
-            values.append(field.null_option)
+    # If the field has a `null_option` attribute set and it is selected,
+    # add it to the field's grouped choices.
+    if getattr(field, 'null_option', None) and None in filter_data:
+        values.remove(None)
+        values.insert(0, field.null_option)
 
     return values
 

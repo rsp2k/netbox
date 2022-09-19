@@ -1,6 +1,6 @@
 from django.test import TestCase
 
-from dcim.models import Device, DeviceRole, DeviceType, Manufacturer, Platform, Region, Site, SiteGroup
+from dcim.models import Device, DeviceRole, DeviceType, Location, Manufacturer, Platform, Region, Site, SiteGroup
 from extras.models import ConfigContext, Tag
 from tenancy.models import Tenant, TenantGroup
 from virtualization.models import Cluster, ClusterGroup, ClusterType, VirtualMachine
@@ -29,7 +29,8 @@ class ConfigContextTest(TestCase):
         self.devicerole = DeviceRole.objects.create(name='Device Role 1', slug='device-role-1')
         self.region = Region.objects.create(name="Region")
         self.sitegroup = SiteGroup.objects.create(name="Site Group")
-        self.site = Site.objects.create(name='Site-1', slug='site-1', region=self.region, group=self.sitegroup)
+        self.site = Site.objects.create(name='Site 1', slug='site-1', region=self.region, group=self.sitegroup)
+        self.location = Location.objects.create(name='Location 1', slug='location-1', site=self.site)
         self.platform = Platform.objects.create(name="Platform")
         self.tenantgroup = TenantGroup.objects.create(name="Tenant Group")
         self.tenant = Tenant.objects.create(name="Tenant", group=self.tenantgroup)
@@ -40,7 +41,8 @@ class ConfigContextTest(TestCase):
             name='Device 1',
             device_type=self.devicetype,
             device_role=self.devicerole,
-            site=self.site
+            site=self.site,
+            location=self.location
         )
 
     def test_higher_weight_wins(self):
@@ -144,15 +146,6 @@ class ConfigContextTest(TestCase):
         self.assertEqual(self.device.get_config_context(), annotated_queryset[0].get_config_context())
 
     def test_annotation_same_as_get_for_object_device_relations(self):
-
-        site_context = ConfigContext.objects.create(
-            name="site",
-            weight=100,
-            data={
-                "site": 1
-            }
-        )
-        site_context.sites.add(self.site)
         region_context = ConfigContext.objects.create(
             name="region",
             weight=100,
@@ -169,6 +162,22 @@ class ConfigContextTest(TestCase):
             }
         )
         sitegroup_context.site_groups.add(self.sitegroup)
+        site_context = ConfigContext.objects.create(
+            name="site",
+            weight=100,
+            data={
+                "site": 1
+            }
+        )
+        site_context.sites.add(self.site)
+        location_context = ConfigContext.objects.create(
+            name="location",
+            weight=100,
+            data={
+                "location": 1
+            }
+        )
+        location_context.locations.add(self.location)
         platform_context = ConfigContext.objects.create(
             name="platform",
             weight=100,
@@ -205,6 +214,7 @@ class ConfigContextTest(TestCase):
         device = Device.objects.create(
             name="Device 2",
             site=self.site,
+            location=self.location,
             tenant=self.tenant,
             platform=self.platform,
             device_role=self.devicerole,
@@ -216,80 +226,77 @@ class ConfigContextTest(TestCase):
         self.assertEqual(device.get_config_context(), annotated_queryset[0].get_config_context())
 
     def test_annotation_same_as_get_for_object_virtualmachine_relations(self):
+        cluster_type = ClusterType.objects.create(name="Cluster Type")
+        cluster_group = ClusterGroup.objects.create(name="Cluster Group")
+        cluster = Cluster.objects.create(name="Cluster", group=cluster_group, type=cluster_type)
+
+        region_context = ConfigContext.objects.create(
+            name="region",
+            weight=100,
+            data={"region": 1}
+        )
+        region_context.regions.add(self.region)
+
+        sitegroup_context = ConfigContext.objects.create(
+            name="sitegroup",
+            weight=100,
+            data={"sitegroup": 1}
+        )
+        sitegroup_context.site_groups.add(self.sitegroup)
 
         site_context = ConfigContext.objects.create(
             name="site",
             weight=100,
-            data={
-                "site": 1
-            }
+            data={"site": 1}
         )
         site_context.sites.add(self.site)
-        region_context = ConfigContext.objects.create(
-            name="region",
-            weight=100,
-            data={
-                "region": 1
-            }
-        )
-        region_context.regions.add(self.region)
-        sitegroup_context = ConfigContext.objects.create(
-            name="sitegroup",
-            weight=100,
-            data={
-                "sitegroup": 1
-            }
-        )
-        sitegroup_context.site_groups.add(self.sitegroup)
+
         platform_context = ConfigContext.objects.create(
             name="platform",
             weight=100,
-            data={
-                "platform": 1
-            }
+            data={"platform": 1}
         )
         platform_context.platforms.add(self.platform)
+
         tenant_group_context = ConfigContext.objects.create(
             name="tenant group",
             weight=100,
-            data={
-                "tenant_group": 1
-            }
+            data={"tenant_group": 1}
         )
         tenant_group_context.tenant_groups.add(self.tenantgroup)
+
         tenant_context = ConfigContext.objects.create(
             name="tenant",
             weight=100,
-            data={
-                "tenant": 1
-            }
+            data={"tenant": 1}
         )
         tenant_context.tenants.add(self.tenant)
+
         tag_context = ConfigContext.objects.create(
             name="tag",
             weight=100,
-            data={
-                "tag": 1
-            }
+            data={"tag": 1}
         )
         tag_context.tags.add(self.tag)
-        cluster_group = ClusterGroup.objects.create(name="Cluster Group")
+
+        cluster_type_context = ConfigContext.objects.create(
+            name="cluster type",
+            weight=100,
+            data={"cluster_type": 1}
+        )
+        cluster_type_context.cluster_types.add(cluster_type)
+
         cluster_group_context = ConfigContext.objects.create(
             name="cluster group",
             weight=100,
-            data={
-                "cluster_group": 1
-            }
+            data={"cluster_group": 1}
         )
         cluster_group_context.cluster_groups.add(cluster_group)
-        cluster_type = ClusterType.objects.create(name="Cluster Type 1")
-        cluster = Cluster.objects.create(name="Cluster", group=cluster_group, type=cluster_type)
+
         cluster_context = ConfigContext.objects.create(
             name="cluster",
             weight=100,
-            data={
-                "cluster": 1
-            }
+            data={"cluster": 1}
         )
         cluster_context.clusters.add(cluster)
 

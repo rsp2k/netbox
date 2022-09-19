@@ -1,22 +1,40 @@
+import graphene
+
 from ipam import filtersets, models
-from netbox.graphql.types import OrganizationalObjectType, PrimaryObjectType
+from netbox.graphql.scalars import BigInt
+from netbox.graphql.types import BaseObjectType, OrganizationalObjectType, NetBoxObjectType
 
 __all__ = (
+    'ASNType',
     'AggregateType',
+    'FHRPGroupType',
+    'FHRPGroupAssignmentType',
     'IPAddressType',
     'IPRangeType',
+    'L2VPNType',
+    'L2VPNTerminationType',
     'PrefixType',
     'RIRType',
     'RoleType',
     'RouteTargetType',
     'ServiceType',
+    'ServiceTemplateType',
     'VLANType',
     'VLANGroupType',
     'VRFType',
 )
 
 
-class AggregateType(PrimaryObjectType):
+class ASNType(NetBoxObjectType):
+    asn = graphene.Field(BigInt)
+
+    class Meta:
+        model = models.ASN
+        fields = '__all__'
+        filterset_class = filtersets.ASNFilterSet
+
+
+class AggregateType(NetBoxObjectType):
 
     class Meta:
         model = models.Aggregate
@@ -24,7 +42,26 @@ class AggregateType(PrimaryObjectType):
         filterset_class = filtersets.AggregateFilterSet
 
 
-class IPAddressType(PrimaryObjectType):
+class FHRPGroupType(NetBoxObjectType):
+
+    class Meta:
+        model = models.FHRPGroup
+        fields = '__all__'
+        filterset_class = filtersets.FHRPGroupFilterSet
+
+    def resolve_auth_type(self, info):
+        return self.auth_type or None
+
+
+class FHRPGroupAssignmentType(BaseObjectType):
+
+    class Meta:
+        model = models.FHRPGroupAssignment
+        fields = '__all__'
+        filterset_class = filtersets.FHRPGroupAssignmentFilterSet
+
+
+class IPAddressType(NetBoxObjectType):
 
     class Meta:
         model = models.IPAddress
@@ -35,7 +72,7 @@ class IPAddressType(PrimaryObjectType):
         return self.role or None
 
 
-class IPRangeType(PrimaryObjectType):
+class IPRangeType(NetBoxObjectType):
 
     class Meta:
         model = models.IPRange
@@ -46,7 +83,7 @@ class IPRangeType(PrimaryObjectType):
         return self.role or None
 
 
-class PrefixType(PrimaryObjectType):
+class PrefixType(NetBoxObjectType):
 
     class Meta:
         model = models.Prefix
@@ -70,7 +107,7 @@ class RoleType(OrganizationalObjectType):
         filterset_class = filtersets.RoleFilterSet
 
 
-class RouteTargetType(PrimaryObjectType):
+class RouteTargetType(NetBoxObjectType):
 
     class Meta:
         model = models.RouteTarget
@@ -78,7 +115,7 @@ class RouteTargetType(PrimaryObjectType):
         filterset_class = filtersets.RouteTargetFilterSet
 
 
-class ServiceType(PrimaryObjectType):
+class ServiceType(NetBoxObjectType):
 
     class Meta:
         model = models.Service
@@ -86,7 +123,15 @@ class ServiceType(PrimaryObjectType):
         filterset_class = filtersets.ServiceFilterSet
 
 
-class VLANType(PrimaryObjectType):
+class ServiceTemplateType(NetBoxObjectType):
+
+    class Meta:
+        model = models.ServiceTemplate
+        fields = '__all__'
+        filterset_class = filtersets.ServiceTemplateFilterSet
+
+
+class VLANType(NetBoxObjectType):
 
     class Meta:
         model = models.VLAN
@@ -102,9 +147,23 @@ class VLANGroupType(OrganizationalObjectType):
         filterset_class = filtersets.VLANGroupFilterSet
 
 
-class VRFType(PrimaryObjectType):
+class VRFType(NetBoxObjectType):
 
     class Meta:
         model = models.VRF
         fields = '__all__'
         filterset_class = filtersets.VRFFilterSet
+
+
+class L2VPNType(NetBoxObjectType):
+    class Meta:
+        model = models.L2VPN
+        fields = '__all__'
+        filtersets_class = filtersets.L2VPNFilterSet
+
+
+class L2VPNTerminationType(NetBoxObjectType):
+    class Meta:
+        model = models.L2VPNTermination
+        fields = '__all__'
+        filtersets_class = filtersets.L2VPNTerminationFilterSet

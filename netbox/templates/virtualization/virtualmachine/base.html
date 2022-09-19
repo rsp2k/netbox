@@ -5,7 +5,13 @@
 
 {% block breadcrumbs %}
   {{ block.super }}
-  <li class="breadcrumb-item"><a href="{% url 'virtualization:virtualmachine_list' %}?cluster_id={{ object.cluster.pk }}">{{ object.cluster }}</a></li>
+  <li class="breadcrumb-item">
+    {% if object.cluster %}
+      <a href="{% url 'virtualization:virtualmachine_list' %}?cluster_id={{ object.cluster.pk }}">{{ object.cluster }}</a>
+    {% else %}
+      <a href="{% url 'virtualization:virtualmachine_list' %}?site_id={{ object.site.pk }}">{{ object.site }}</a>
+    {% endif %}
+  </li>
 {% endblock %}
 
 {% block extra_controls %}
@@ -16,10 +22,7 @@
   {% endif %}
 {% endblock %}
 
-{% block tab_items %}
-  <li class="nav-item" role="presentation">
-    <a class="nav-link{% if not active_tab %} active{% endif %}" href="{{ object.get_absolute_url }}">Virtual Machine</a>
-  </li>
+{% block extra_tabs %}
   {% with interface_count=object.interfaces.count %}
       {% if interface_count %}
           <li class="nav-item" role="presentation">

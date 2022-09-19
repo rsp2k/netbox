@@ -21,22 +21,15 @@
                   <tr>
                       <th scope="row">Tenant</th>
                       <td>
-                          {% if object.tenant %}
-                              <a href="{{ object.tenant.get_absolute_url }}">{{ object.tenant }}</a>
-                          {% else %}
-                              <span class="text-muted">None</span>
+                          {% if object.tenant.group %}
+                              {{ object.tenant.group|linkify }} /
                           {% endif %}
+                          {{ object.tenant|linkify|placeholder }}
                       </td>
                   </tr>
                   <tr>
                       <th scope="row">Unique IP Space</th>
-                      <td>
-                          {% if object.enforce_unique %}
-                              <i class="mdi mdi-check-bold text-success" title="Yes"></i>
-                          {% else %}
-                              <i class="mdi mdi-close-thick text-danger" title="No"></i>
-                          {% endif %}
-                      </td>
+                      <td>{% checkmark object.enforce_unique %}</td>
                   </tr>
                   <tr>
                       <th scope="row">Description</th>
@@ -60,8 +53,8 @@
       {% plugin_left_page object %}
   </div>
   <div class="col col-md-6">
-    {% include 'extras/inc/tags_panel.html' with tags=object.tags.all url='ipam:vrf_list' %}
-    {% include 'inc/custom_fields_panel.html' %}
+    {% include 'inc/panels/tags.html' %}
+    {% include 'inc/panels/custom_fields.html' %}
     {% plugin_right_page object %}
 	</div>
 </div>

@@ -1,8 +1,10 @@
-import Cookie from 'cookie';
-
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 type ReqData = URLSearchParams | Dict | undefined | unknown;
 type SelectedOption = { name: string; options: string[] };
+
+declare global {
+    interface Window { CSRF_TOKEN: any; }
+}
 
 /**
  * Infer valid HTMLElement props based on element name.
@@ -93,23 +95,12 @@ export function isElement(obj: Element | null | undefined): obj is Element {
   return typeof obj !== null && typeof obj !== 'undefined';
 }
 
-/**
- * Retrieve the CSRF token from cookie storage.
- */
-function getCsrfToken(): string {
-  const { csrftoken: csrfToken } = Cookie.parse(document.cookie);
-  if (typeof csrfToken === 'undefined') {
-    throw new Error('Invalid or missing CSRF token');
-  }
-  return csrfToken;
-}
-
 export async function apiRequest<R extends Dict, D extends ReqData = undefined>(
   url: string,
   method: Method,
   data?: D,
 ): Promise<APIResponse<R>> {
-  const token = getCsrfToken();
+  const token = window.CSRF_TOKEN;
   const headers = new Headers({ 'X-CSRFToken': token });
 
   let body;
@@ -231,11 +222,15 @@ export function scrollTo(element: Element, offset: number = 0): void {
  * Iterate through a select element's options and return an array of options that are selected.
  *
  * @param base Select element.
+ * @param selector Optionally specify a selector. 'select' by default.
  * @returns Array of selected options.
  */
-export function getSelectedOptions<E extends HTMLElement>(base: E): SelectedOption[] {
+export function getSelectedOptions<E extends HTMLElement>(
+  base: E,
+  selector: string = 'select',
+): SelectedOption[] {
   let selected = [] as SelectedOption[];
-  for (const element of base.querySelectorAll<HTMLSelectElement>('select')) {
+  for (const element of base.querySelectorAll<HTMLSelectElement>(selector)) {
     if (element !== null) {
       const select = { name: element.name, options: [] } as SelectedOption;
       for (const option of element.options) {
@@ -315,7 +310,7 @@ export function* getRowValues(table: HTMLTableRowElement): Generator<string> {
   for (const element of table.querySelectorAll<HTMLTableCellElement>('td')) {
     if (element !== null) {
       if (isTruthy(element.innerText) && element.innerText !== '—') {
-        yield element.innerText.replaceAll(/[\n\r]/g, '').trim();
+        yield replaceAll(element.innerText, '[\n\r]', '').trim();
       }
     }
   }
@@ -435,4 +430,50 @@ export function uniqueByProperty<T extends unknown, P extends keyof T>(arr: T[],
     }
   }
   return Array.from(baseMap.values());
+}
+
+/**
+ * Replace all occurrences of a pattern with a replacement string.
+ *
+ * This is a browser-compatibility-focused drop-in replacement for `String.prototype.replaceAll()`,
+ * introduced in ES2021.
+ *
+ * @param input string to be processed.
+ * @param pattern regex pattern string or RegExp object to search for.
+ * @param replacement replacement substring with which `pattern` matches will be replaced.
+ * @returns processed version of `input`.
+ */
+export function replaceAll(input: string, pattern: string | RegExp, replacement: string): string {
+  // Ensure input is a string.
+  if (typeof input !== 'string') {
+    throw new TypeError("replaceAll 'input' argument must be a string");
+  }
+  // Ensure pattern is a string or RegExp.
+  if (typeof pattern !== 'string' && !(pattern instanceof RegExp)) {
+    throw new TypeError("replaceAll 'pattern' argument must be a string or RegExp instance");
+  }
+  // Ensure replacement is able to be stringified.
+  switch (typeof replacement) {
+    case 'boolean':
+      replacement = String(replacement);
+      break;
+    case 'number':
+      replacement = String(replacement);
+      break;
+    case 'string':
+      break;
+    default:
+      throw new TypeError("replaceAll 'replacement' argument must be stringifyable");
+  }
+
+  if (pattern instanceof RegExp) {
+    // Add global flag to existing RegExp object and deduplicate
+    const flags = Array.from(new Set([...pattern.flags.split(''), 'g'])).join('');
+    pattern = new RegExp(pattern.source, flags);
+  } else {
+    // Create a RegExp object with the global flag set.
+    pattern = new RegExp(pattern, 'g');
+  }
+
+  return input.replace(pattern, replacement);
 }

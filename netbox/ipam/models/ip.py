@@ -1,28 +1,28 @@
 import netaddr
-from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import F, Q
+from django.db.models import F
 from django.urls import reverse
 from django.utils.functional import cached_property
 
+from dcim.fields import ASNField
 from dcim.models import Device
-from extras.utils import extras_features
-from netbox.models import OrganizationalModel, PrimaryModel
+from netbox.models import OrganizationalModel, NetBoxModel
 from ipam.choices import *
 from ipam.constants import *
 from ipam.fields import IPNetworkField, IPAddressField
 from ipam.managers import IPAddressManager
 from ipam.querysets import PrefixQuerySet
 from ipam.validators import DNSValidator
-from utilities.querysets import RestrictedQuerySet
+from netbox.config import get_config
 from virtualization.models import VirtualMachine
 
 
 __all__ = (
     'Aggregate',
+    'ASN',
     'IPAddress',
     'IPRange',
     'Prefix',
@@ -31,7 +31,31 @@ __all__ = (
 )
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'webhooks')
+class GetAvailablePrefixesMixin:
+
+    def get_available_prefixes(self):
+        """
+        Return all available prefixes within this Aggregate or Prefix as an IPSet.
+        """
+        params = {
+            'prefix__net_contained': str(self.prefix)
+        }
+        if hasattr(self, 'vrf'):
+            params['vrf'] = self.vrf
+
+        child_prefixes = Prefix.objects.filter(**params).values_list('prefix', flat=True)
+        return netaddr.IPSet(self.prefix) - netaddr.IPSet(child_prefixes)
+
+    def get_first_available_prefix(self):
+        """
+        Return the first available child prefix within the prefix (or None).
+        """
+        available_prefixes = self.get_available_prefixes()
+        if not available_prefixes:
+            return None
+        return available_prefixes.iter_cidrs()[0]
+
+
 class RIR(OrganizationalModel):
     """
     A Regional Internet Registry (RIR) is responsible for the allocation of a large portion of the global IP address
@@ -55,8 +79,6 @@ class RIR(OrganizationalModel):
         blank=True
     )
 
-    objects = RestrictedQuerySet.as_manager()
-
     class Meta:
         ordering = ['name']
         verbose_name = 'RIR'
@@ -69,8 +91,70 @@ class RIR(OrganizationalModel):
         return reverse('ipam:rir', args=[self.pk])
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'tags', 'webhooks')
-class Aggregate(PrimaryModel):
+class ASN(NetBoxModel):
+    """
+    An autonomous system (AS) number is typically used to represent an independent routing domain. A site can have
+    one or more ASNs assigned to it.
+    """
+    asn = ASNField(
+        unique=True,
+        verbose_name='ASN',
+        help_text='32-bit autonomous system number'
+    )
+    description = models.CharField(
+        max_length=200,
+        blank=True
+    )
+    rir = models.ForeignKey(
+        to='ipam.RIR',
+        on_delete=models.PROTECT,
+        related_name='asns',
+        verbose_name='RIR'
+    )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='asns',
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        ordering = ['asn']
+        verbose_name = 'ASN'
+        verbose_name_plural = 'ASNs'
+
+    def __str__(self):
+        return f'AS{self.asn_with_asdot}'
+
+    @classmethod
+    def get_prerequisite_models(cls):
+        return [RIR, ]
+
+    def get_absolute_url(self):
+        return reverse('ipam:asn', args=[self.pk])
+
+    @property
+    def asn_asdot(self):
+        """
+        Return ASDOT notation for AS numbers greater than 16 bits.
+        """
+        if self.asn > 65535:
+            return f'{self.asn // 65536}.{self.asn % 65536}'
+        return self.asn
+
+    @property
+    def asn_with_asdot(self):
+        """
+        Return both plain and ASDOT notation, where applicable.
+        """
+        if self.asn > 65535:
+            return f'{self.asn} ({self.asn // 65536}.{self.asn % 65536})'
+        else:
+            return self.asn
+
+
+class Aggregate(GetAvailablePrefixesMixin, NetBoxModel):
     """
     An aggregate exists at the root level of the IP address space hierarchy in NetBox. Aggregates are used to organize
     the hierarchy and track the overall utilization of available address space. Each Aggregate is assigned to a RIR.
@@ -98,17 +182,19 @@ class Aggregate(PrimaryModel):
         blank=True
     )
 
-    objects = RestrictedQuerySet.as_manager()
-
-    clone_fields = [
+    clone_fields = (
         'rir', 'tenant', 'date_added', 'description',
-    ]
+    )
 
     class Meta:
         ordering = ('prefix', 'pk')  # prefix may be non-unique
 
     def __str__(self):
         return str(self.prefix)
+
+    @classmethod
+    def get_prerequisite_models(cls):
+        return [RIR, ]
 
     def get_absolute_url(self):
         return reverse('ipam:aggregate', args=[self.pk])
@@ -157,18 +243,23 @@ class Aggregate(PrimaryModel):
             return self.prefix.version
         return None
 
+    def get_child_prefixes(self):
+        """
+        Return all Prefixes within this Aggregate
+        """
+        return Prefix.objects.filter(prefix__net_contained=str(self.prefix))
+
     def get_utilization(self):
         """
         Determine the prefix utilization of the aggregate and return it as a percentage.
         """
         queryset = Prefix.objects.filter(prefix__net_contained_or_equal=str(self.prefix))
         child_prefixes = netaddr.IPSet([p.prefix for p in queryset])
-        utilization = int(float(child_prefixes.size) / self.prefix.size * 100)
+        utilization = float(child_prefixes.size) / self.prefix.size * 100
 
         return min(utilization, 100)
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'webhooks')
 class Role(OrganizationalModel):
     """
     A Role represents the functional role of a Prefix or VLAN; for example, "Customer," "Infrastructure," or
@@ -190,8 +281,6 @@ class Role(OrganizationalModel):
         blank=True,
     )
 
-    objects = RestrictedQuerySet.as_manager()
-
     class Meta:
         ordering = ['weight', 'name']
 
@@ -202,8 +291,7 @@ class Role(OrganizationalModel):
         return reverse('ipam:role', args=[self.pk])
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'tags', 'webhooks')
-class Prefix(PrimaryModel):
+class Prefix(GetAvailablePrefixesMixin, NetBoxModel):
     """
     A Prefix represents an IPv4 or IPv6 network, including mask length. Prefixes can optionally be assigned to Sites and
     VRFs. A Prefix must be assigned a status and may optionally be assigned a used-define Role. A Prefix can also be
@@ -283,9 +371,9 @@ class Prefix(PrimaryModel):
 
     objects = PrefixQuerySet.as_manager()
 
-    clone_fields = [
+    clone_fields = (
         'site', 'vrf', 'tenant', 'vlan', 'status', 'role', 'is_pool', 'mark_utilized', 'description',
-    ]
+    )
 
     class Meta:
         ordering = (F('vrf').asc(nulls_first=True), 'prefix', 'pk')  # (vrf, prefix) may be non-unique
@@ -296,7 +384,7 @@ class Prefix(PrimaryModel):
 
         # Cache the original prefix and VRF so we can check if they have changed on post_save
         self._prefix = self.prefix
-        self._vrf = self.vrf
+        self._vrf_id = self.vrf_id
 
     def __str__(self):
         return str(self.prefix)
@@ -316,7 +404,7 @@ class Prefix(PrimaryModel):
                 })
 
             # Enforce unique IP space (if applicable)
-            if (self.vrf is None and settings.ENFORCE_GLOBAL_UNIQUE) or (self.vrf and self.vrf.enforce_unique):
+            if (self.vrf is None and get_config().ENFORCE_GLOBAL_UNIQUE) or (self.vrf and self.vrf.enforce_unique):
                 duplicate_prefixes = self.get_duplicates()
                 if duplicate_prefixes:
                     raise ValidationError({
@@ -360,8 +448,8 @@ class Prefix(PrimaryModel):
             self.prefix.prefixlen = value
     prefix_length = property(fset=_set_prefix_length)
 
-    def get_status_class(self):
-        return PrefixStatusChoices.CSS_CLASSES.get(self.status)
+    def get_status_color(self):
+        return PrefixStatusChoices.colors.get(self.status)
 
     def get_parents(self, include_self=False):
         """
@@ -416,16 +504,6 @@ class Prefix(PrimaryModel):
         else:
             return IPAddress.objects.filter(address__net_host_contained=str(self.prefix), vrf=self.vrf)
 
-    def get_available_prefixes(self):
-        """
-        Return all available Prefixes within this prefix as an IPSet.
-        """
-        prefix = netaddr.IPSet(self.prefix)
-        child_prefixes = netaddr.IPSet([child.prefix for child in self.get_child_prefixes()])
-        available_prefixes = prefix - child_prefixes
-
-        return available_prefixes
-
     def get_available_ips(self):
         """
         Return all available IPs within this prefix as an IPSet.
@@ -440,26 +518,21 @@ class Prefix(PrimaryModel):
             child_ranges.add(iprange.range)
         available_ips = prefix - child_ips - child_ranges
 
-        # IPv6, pool, or IPv4 /31-/32 sets are fully usable
-        if self.family == 6 or self.is_pool or (self.family == 4 and self.prefix.prefixlen >= 31):
+        # IPv6 /127's, pool, or IPv4 /31-/32 sets are fully usable
+        if (self.family == 6 and self.prefix.prefixlen >= 127) or self.is_pool or (self.family == 4 and self.prefix.prefixlen >= 31):
             return available_ips
 
-        # For "normal" IPv4 prefixes, omit first and last addresses
-        available_ips -= netaddr.IPSet([
-            netaddr.IPAddress(self.prefix.first),
-            netaddr.IPAddress(self.prefix.last),
-        ])
-
+        if self.family == 4:
+            # For "normal" IPv4 prefixes, omit first and last addresses
+            available_ips -= netaddr.IPSet([
+                netaddr.IPAddress(self.prefix.first),
+                netaddr.IPAddress(self.prefix.last),
+            ])
+        else:
+            # For IPv6 prefixes, omit the Subnet-Router anycast address
+            # per RFC 4291
+            available_ips -= netaddr.IPSet([netaddr.IPAddress(self.prefix.first)])
         return available_ips
-
-    def get_first_available_prefix(self):
-        """
-        Return the first available child prefix within the prefix (or None).
-        """
-        available_prefixes = self.get_available_prefixes()
-        if not available_prefixes:
-            return None
-        return available_prefixes.iter_cidrs()[0]
 
     def get_first_available_ip(self):
         """
@@ -484,7 +557,7 @@ class Prefix(PrimaryModel):
                 vrf=self.vrf
             )
             child_prefixes = netaddr.IPSet([p.prefix for p in queryset])
-            utilization = int(float(child_prefixes.size) / self.prefix.size * 100)
+            utilization = float(child_prefixes.size) / self.prefix.size * 100
         else:
             # Compile an IPSet to avoid counting duplicate IPs
             child_ips = netaddr.IPSet(
@@ -494,13 +567,12 @@ class Prefix(PrimaryModel):
             prefix_size = self.prefix.size
             if self.prefix.version == 4 and self.prefix.prefixlen < 31 and not self.is_pool:
                 prefix_size -= 2
-            utilization = int(float(child_ips.size) / prefix_size * 100)
+            utilization = float(child_ips.size) / prefix_size * 100
 
         return min(utilization, 100)
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'tags', 'webhooks')
-class IPRange(PrimaryModel):
+class IPRange(NetBoxModel):
     """
     A range of IP addresses, defined by start and end addresses.
     """
@@ -547,11 +619,9 @@ class IPRange(PrimaryModel):
         blank=True
     )
 
-    objects = RestrictedQuerySet.as_manager()
-
-    clone_fields = [
+    clone_fields = (
         'vrf', 'tenant', 'status', 'role', 'description',
-    ]
+    )
 
     class Meta:
         ordering = (F('vrf').asc(nulls_first=True), 'start_address', 'pk')  # (vrf, start_address) may be non-unique
@@ -651,8 +721,8 @@ class IPRange(PrimaryModel):
         self.end_address.prefixlen = value
     prefix_length = property(fset=_set_prefix_length)
 
-    def get_status_class(self):
-        return IPRangeStatusChoices.CSS_CLASSES.get(self.status)
+    def get_status_color(self):
+        return IPRangeStatusChoices.colors.get(self.status)
 
     def get_child_ips(self):
         """
@@ -697,8 +767,7 @@ class IPRange(PrimaryModel):
         return int(float(child_count) / self.size * 100)
 
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'tags', 'webhooks')
-class IPAddress(PrimaryModel):
+class IPAddress(NetBoxModel):
     """
     An IPAddress represents an individual IPv4 or IPv6 address and its mask. The mask length should match what is
     configured in the real world. (Typically, only loopback interfaces are configured with /32 or /128 masks.) Like
@@ -747,7 +816,7 @@ class IPAddress(PrimaryModel):
         blank=True,
         null=True
     )
-    assigned_object_id = models.PositiveIntegerField(
+    assigned_object_id = models.PositiveBigIntegerField(
         blank=True,
         null=True
     )
@@ -755,7 +824,7 @@ class IPAddress(PrimaryModel):
         ct_field='assigned_object_type',
         fk_field='assigned_object_id'
     )
-    nat_inside = models.OneToOneField(
+    nat_inside = models.ForeignKey(
         to='self',
         on_delete=models.SET_NULL,
         related_name='nat_outside',
@@ -778,9 +847,9 @@ class IPAddress(PrimaryModel):
 
     objects = IPAddressManager()
 
-    clone_fields = [
-        'vrf', 'tenant', 'status', 'role', 'description',
-    ]
+    clone_fields = (
+        'vrf', 'tenant', 'status', 'role', 'dns_name', 'description',
+    )
 
     class Meta:
         ordering = ('address', 'pk')  # address may be non-unique
@@ -799,6 +868,25 @@ class IPAddress(PrimaryModel):
             address__net_host=str(self.address.ip)
         ).exclude(pk=self.pk)
 
+    def get_next_available_ip(self):
+        """
+        Return the next available IP address within this IP's network (if any)
+        """
+        if self.address and self.address.broadcast:
+            start_ip = self.address.ip + 1
+            end_ip = self.address.broadcast - 1
+            if start_ip <= end_ip:
+                available_ips = netaddr.IPSet(netaddr.IPRange(start_ip, end_ip))
+                available_ips -= netaddr.IPSet([
+                    address.ip for address in IPAddress.objects.filter(
+                        vrf=self.vrf,
+                        address__gt=self.address,
+                        address__net_contained_or_equal=self.address.cidr
+                    ).values_list('address', flat=True)
+                ])
+                if available_ips:
+                    return next(iter(available_ips))
+
     def clean(self):
         super().clean()
 
@@ -811,7 +899,7 @@ class IPAddress(PrimaryModel):
                 })
 
             # Enforce unique IP space (if applicable)
-            if (self.vrf is None and settings.ENFORCE_GLOBAL_UNIQUE) or (self.vrf and self.vrf.enforce_unique):
+            if (self.vrf is None and get_config().ENFORCE_GLOBAL_UNIQUE) or (self.vrf and self.vrf.enforce_unique):
                 duplicate_ips = self.get_duplicates()
                 if duplicate_ips and (
                         self.role not in IPADDRESS_ROLES_NONUNIQUE or
@@ -849,9 +937,19 @@ class IPAddress(PrimaryModel):
 
         super().save(*args, **kwargs)
 
+    def clone(self):
+        attrs = super().clone()
+
+        # Populate the address field with the next available IP (if any)
+        if next_available_ip := self.get_next_available_ip():
+            attrs['address'] = f'{next_available_ip}/{self.address.prefixlen}'
+
+        return attrs
+
     def to_objectchange(self, action):
-        # Annotate the assigned object, if any
-        return super().to_objectchange(action, related_object=self.assigned_object)
+        objectchange = super().to_objectchange(action)
+        objectchange.related_object = self.assigned_object
+        return objectchange
 
     @property
     def family(self):
@@ -868,8 +966,8 @@ class IPAddress(PrimaryModel):
             self.address.prefixlen = value
     mask_length = property(fset=_set_mask_length)
 
-    def get_status_class(self):
-        return IPAddressStatusChoices.CSS_CLASSES.get(self.status)
+    def get_status_color(self):
+        return IPAddressStatusChoices.colors.get(self.status)
 
-    def get_role_class(self):
-        return IPAddressRoleChoices.CSS_CLASSES.get(self.role)
+    def get_role_color(self):
+        return IPAddressRoleChoices.colors.get(self.role)

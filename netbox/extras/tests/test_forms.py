@@ -17,6 +17,9 @@ class CustomFieldModelFormTest(TestCase):
         cf_text = CustomField.objects.create(name='text', type=CustomFieldTypeChoices.TYPE_TEXT)
         cf_text.content_types.set([obj_type])
 
+        cf_longtext = CustomField.objects.create(name='longtext', type=CustomFieldTypeChoices.TYPE_LONGTEXT)
+        cf_longtext.content_types.set([obj_type])
+
         cf_integer = CustomField.objects.create(name='integer', type=CustomFieldTypeChoices.TYPE_INTEGER)
         cf_integer.content_types.set([obj_type])
 
@@ -29,12 +32,32 @@ class CustomFieldModelFormTest(TestCase):
         cf_url = CustomField.objects.create(name='url', type=CustomFieldTypeChoices.TYPE_URL)
         cf_url.content_types.set([obj_type])
 
+        cf_json = CustomField.objects.create(name='json', type=CustomFieldTypeChoices.TYPE_JSON)
+        cf_json.content_types.set([obj_type])
+
         cf_select = CustomField.objects.create(name='select', type=CustomFieldTypeChoices.TYPE_SELECT, choices=CHOICES)
         cf_select.content_types.set([obj_type])
 
-        cf_multiselect = CustomField.objects.create(name='multiselect', type=CustomFieldTypeChoices.TYPE_MULTISELECT,
-                                                    choices=CHOICES)
+        cf_multiselect = CustomField.objects.create(
+            name='multiselect',
+            type=CustomFieldTypeChoices.TYPE_MULTISELECT,
+            choices=CHOICES
+        )
         cf_multiselect.content_types.set([obj_type])
+
+        cf_object = CustomField.objects.create(
+            name='object',
+            type=CustomFieldTypeChoices.TYPE_OBJECT,
+            object_type=ContentType.objects.get_for_model(Site)
+        )
+        cf_object.content_types.set([obj_type])
+
+        cf_multiobject = CustomField.objects.create(
+            name='multiobject',
+            type=CustomFieldTypeChoices.TYPE_MULTIOBJECT,
+            object_type=ContentType.objects.get_for_model(Site)
+        )
+        cf_multiobject.content_types.set([obj_type])
 
     def test_empty_values(self):
         """

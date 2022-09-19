@@ -3,7 +3,6 @@ import inspect
 import logging
 import pkgutil
 import traceback
-from collections import OrderedDict
 
 from django.conf import settings
 from django.utils import timezone
@@ -27,20 +26,18 @@ def get_report(module_name, report_name):
     """
     Return a specific report from within a module.
     """
-    file_path = '{}/{}.py'.format(settings.REPORTS_ROOT, module_name)
+    reports = get_reports()
+    module = reports.get(module_name)
 
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except FileNotFoundError:
+    if module is None:
         return None
 
-    report = getattr(module, report_name, None)
+    report = module.get(report_name)
+
     if report is None:
         return None
 
-    return report()
+    return report
 
 
 def get_reports():
@@ -53,7 +50,7 @@ def get_reports():
         ...
     ]
     """
-    module_list = []
+    module_list = {}
 
     # Iterate through all modules within the reports path. These are the user-created files in which reports are
     # defined.
@@ -62,7 +59,16 @@ def get_reports():
         report_order = getattr(module, "report_order", ())
         ordered_reports = [cls() for cls in report_order if is_report(cls)]
         unordered_reports = [cls() for _, cls in inspect.getmembers(module, is_report) if cls not in report_order]
-        module_list.append((module_name, [*ordered_reports, *unordered_reports]))
+
+        module_reports = {}
+
+        for cls in [*ordered_reports, *unordered_reports]:
+            # For reports in submodules use the full import path w/o the root module as the name
+            report_name = cls.full_name.split(".", maxsplit=1)[1]
+            module_reports[report_name] = cls
+
+        if module_reports:
+            module_list[module_name] = module_reports
 
     return module_list
 
@@ -83,15 +89,6 @@ def run_report(job_result, *args, **kwargs):
         job_result.set_status(JobResultStatusChoices.STATUS_ERRORED)
         job_result.save()
         logging.error(f"Error during execution of report {job_result.name}")
-
-    # Delete any previous terminal state results
-    JobResult.objects.filter(
-        obj_type=job_result.obj_type,
-        name=job_result.name,
-        status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-    ).exclude(
-        pk=job_result.pk
-    ).delete()
 
 
 class Report(object):
@@ -119,10 +116,11 @@ class Report(object):
     }
     """
     description = None
+    job_timeout = None
 
     def __init__(self):
 
-        self._results = OrderedDict()
+        self._results = {}
         self.active_test = None
         self.failed = False
 
@@ -133,13 +131,13 @@ class Report(object):
         for method in dir(self):
             if method.startswith('test_') and callable(getattr(self, method)):
                 test_methods.append(method)
-                self._results[method] = OrderedDict([
-                    ('success', 0),
-                    ('info', 0),
-                    ('warning', 0),
-                    ('failure', 0),
-                    ('log', []),
-                ])
+                self._results[method] = {
+                    'success': 0,
+                    'info': 0,
+                    'warning': 0,
+                    'failure': 0,
+                    'log': [],
+                }
         if not test_methods:
             raise Exception("A report must contain at least one test method.")
         self.test_methods = test_methods
@@ -167,8 +165,8 @@ class Report(object):
         """
         Log a message from a test method. Do not call this method directly; use one of the log_* wrappers below.
         """
-        if level not in LogLevelChoices.as_dict():
-            raise Exception("Unknown logging level: {}".format(level))
+        if level not in LogLevelChoices.values():
+            raise Exception(f"Unknown logging level: {level}")
         self._results[self.active_test]['log'].append((
             timezone.now().isoformat(),
             level,
@@ -226,6 +224,9 @@ class Report(object):
         job_result.status = JobResultStatusChoices.STATUS_RUNNING
         job_result.save()
 
+        # Perform any post-run tasks
+        self.pre_run()
+
         try:
 
             for method_name in self.test_methods:
@@ -253,8 +254,14 @@ class Report(object):
         # Perform any post-run tasks
         self.post_run()
 
+    def pre_run(self):
+        """
+        Extend this method to include any tasks which should execute *before* the report is run.
+        """
+        pass
+
     def post_run(self):
         """
-        Extend this method to include any tasks which should execute after the report has been run.
+        Extend this method to include any tasks which should execute *after* the report is run.
         """
         pass

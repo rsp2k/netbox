@@ -5,7 +5,7 @@ from extras.choices import *
 from extras.models import *
 from extras.utils import FeatureQuery
 from utilities.forms import (
-    BootstrapMixin, BulkEditForm, BulkEditNullBooleanSelect, ColorField, ContentTypeChoiceField, StaticSelect,
+    add_blank_choice, BulkEditForm, BulkEditNullBooleanSelect, ColorField, ContentTypeChoiceField, StaticSelect,
 )
 
 __all__ = (
@@ -19,10 +19,13 @@ __all__ = (
 )
 
 
-class CustomFieldBulkEditForm(BootstrapMixin, BulkEditForm):
+class CustomFieldBulkEditForm(BulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=CustomField.objects.all(),
         widget=forms.MultipleHiddenInput
+    )
+    group_name = forms.CharField(
+        required=False
     )
     description = forms.CharField(
         required=False
@@ -34,20 +37,30 @@ class CustomFieldBulkEditForm(BootstrapMixin, BulkEditForm):
     weight = forms.IntegerField(
         required=False
     )
+    ui_visibility = forms.ChoiceField(
+        label="UI visibility",
+        choices=add_blank_choice(CustomFieldVisibilityChoices),
+        required=False,
+        initial='',
+        widget=StaticSelect()
+    )
 
-    class Meta:
-        nullable_fields = []
+    nullable_fields = ('group_name', 'description',)
 
 
-class CustomLinkBulkEditForm(BootstrapMixin, BulkEditForm):
+class CustomLinkBulkEditForm(BulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=CustomLink.objects.all(),
         widget=forms.MultipleHiddenInput
     )
     content_type = ContentTypeChoiceField(
         queryset=ContentType.objects.all(),
-        limit_choices_to=FeatureQuery('custom_fields'),
+        limit_choices_to=FeatureQuery('custom_links'),
         required=False
+    )
+    enabled = forms.NullBooleanField(
+        required=False,
+        widget=BulkEditNullBooleanSelect()
     )
     new_window = forms.NullBooleanField(
         required=False,
@@ -57,23 +70,20 @@ class CustomLinkBulkEditForm(BootstrapMixin, BulkEditForm):
         required=False
     )
     button_class = forms.ChoiceField(
-        choices=CustomLinkButtonClassChoices,
+        choices=add_blank_choice(CustomLinkButtonClassChoices),
         required=False,
         widget=StaticSelect()
     )
 
-    class Meta:
-        nullable_fields = []
 
-
-class ExportTemplateBulkEditForm(BootstrapMixin, BulkEditForm):
+class ExportTemplateBulkEditForm(BulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=ExportTemplate.objects.all(),
         widget=forms.MultipleHiddenInput
     )
     content_type = ContentTypeChoiceField(
         queryset=ContentType.objects.all(),
-        limit_choices_to=FeatureQuery('custom_fields'),
+        limit_choices_to=FeatureQuery('export_templates'),
         required=False
     )
     description = forms.CharField(
@@ -93,11 +103,10 @@ class ExportTemplateBulkEditForm(BootstrapMixin, BulkEditForm):
         widget=BulkEditNullBooleanSelect()
     )
 
-    class Meta:
-        nullable_fields = ['description', 'mime_type', 'file_extension']
+    nullable_fields = ('description', 'mime_type', 'file_extension')
 
 
-class WebhookBulkEditForm(BootstrapMixin, BulkEditForm):
+class WebhookBulkEditForm(BulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=Webhook.objects.all(),
         widget=forms.MultipleHiddenInput
@@ -119,28 +128,31 @@ class WebhookBulkEditForm(BootstrapMixin, BulkEditForm):
         widget=BulkEditNullBooleanSelect()
     )
     http_method = forms.ChoiceField(
-        choices=WebhookHttpMethodChoices,
-        required=False
+        choices=add_blank_choice(WebhookHttpMethodChoices),
+        required=False,
+        label='HTTP method'
     )
     payload_url = forms.CharField(
-        required=False
+        required=False,
+        label='Payload URL'
     )
     ssl_verification = forms.NullBooleanField(
         required=False,
-        widget=BulkEditNullBooleanSelect()
+        widget=BulkEditNullBooleanSelect(),
+        label='SSL verification'
     )
     secret = forms.CharField(
         required=False
     )
     ca_file_path = forms.CharField(
-        required=False
+        required=False,
+        label='CA file path'
     )
 
-    class Meta:
-        nullable_fields = ['secret', 'ca_file_path']
+    nullable_fields = ('secret', 'conditions', 'ca_file_path')
 
 
-class TagBulkEditForm(BootstrapMixin, BulkEditForm):
+class TagBulkEditForm(BulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=Tag.objects.all(),
         widget=forms.MultipleHiddenInput
@@ -153,11 +165,10 @@ class TagBulkEditForm(BootstrapMixin, BulkEditForm):
         required=False
     )
 
-    class Meta:
-        nullable_fields = ['description']
+    nullable_fields = ('description',)
 
 
-class ConfigContextBulkEditForm(BootstrapMixin, BulkEditForm):
+class ConfigContextBulkEditForm(BulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=ConfigContext.objects.all(),
         widget=forms.MultipleHiddenInput
@@ -175,25 +186,19 @@ class ConfigContextBulkEditForm(BootstrapMixin, BulkEditForm):
         max_length=100
     )
 
-    class Meta:
-        nullable_fields = [
-            'description',
-        ]
+    nullable_fields = ('description',)
 
 
-class JournalEntryBulkEditForm(BootstrapMixin, BulkEditForm):
+class JournalEntryBulkEditForm(BulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=JournalEntry.objects.all(),
         widget=forms.MultipleHiddenInput
     )
     kind = forms.ChoiceField(
-        choices=JournalEntryKindChoices,
+        choices=add_blank_choice(JournalEntryKindChoices),
         required=False
     )
     comments = forms.CharField(
         required=False,
         widget=forms.Textarea()
     )
-
-    class Meta:
-        nullable_fields = []

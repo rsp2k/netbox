@@ -36,13 +36,15 @@ class CustomFieldTestCase(ViewTestCases.PrimaryObjectViewTestCase):
             'default': None,
             'weight': 200,
             'required': True,
+            'ui_visibility': CustomFieldVisibilityChoices.VISIBILITY_READ_WRITE,
         }
 
         cls.csv_data = (
-            'name,label,type,content_types,weight,filter_logic,choices',
-            'field4,Field 4,text,dcim.site,100,exact,',
-            'field5,Field 5,integer,dcim.site,100,exact,',
-            'field6,Field 6,select,dcim.site,100,exact,"A,B,C"',
+            'name,label,type,content_types,object_type,weight,filter_logic,choices,validation_minimum,validation_maximum,validation_regex,ui_visibility',
+            'field4,Field 4,text,dcim.site,,100,exact,,,,[a-z]{3},read-write',
+            'field5,Field 5,integer,dcim.site,,100,exact,,1,100,,read-write',
+            'field6,Field 6,select,dcim.site,,100,exact,"A,B,C",,,,read-write',
+            'field7,Field 7,object,dcim.site,dcim.region,100,exact,,,,,read-write',
         )
 
         cls.bulk_edit_data = {
@@ -59,29 +61,31 @@ class CustomLinkTestCase(ViewTestCases.PrimaryObjectViewTestCase):
 
         site_ct = ContentType.objects.get_for_model(Site)
         CustomLink.objects.bulk_create((
-            CustomLink(name='Custom Link 1', content_type=site_ct, link_text='Link 1', link_url='http://example.com/?1'),
-            CustomLink(name='Custom Link 2', content_type=site_ct, link_text='Link 2', link_url='http://example.com/?2'),
-            CustomLink(name='Custom Link 3', content_type=site_ct, link_text='Link 3', link_url='http://example.com/?3'),
+            CustomLink(name='Custom Link 1', content_type=site_ct, enabled=True, link_text='Link 1', link_url='http://example.com/?1'),
+            CustomLink(name='Custom Link 2', content_type=site_ct, enabled=True, link_text='Link 2', link_url='http://example.com/?2'),
+            CustomLink(name='Custom Link 3', content_type=site_ct, enabled=False, link_text='Link 3', link_url='http://example.com/?3'),
         ))
 
         cls.form_data = {
             'name': 'Custom Link X',
             'content_type': site_ct.pk,
+            'enabled': False,
             'weight': 100,
-            'button_class': CustomLinkButtonClassChoices.CLASS_DEFAULT,
+            'button_class': CustomLinkButtonClassChoices.DEFAULT,
             'link_text': 'Link X',
             'link_url': 'http://example.com/?x'
         }
 
         cls.csv_data = (
-            "name,content_type,weight,button_class,link_text,link_url",
-            "Custom Link 4,dcim.site,100,blue,Link 4,http://exmaple.com/?4",
-            "Custom Link 5,dcim.site,100,blue,Link 5,http://exmaple.com/?5",
-            "Custom Link 6,dcim.site,100,blue,Link 6,http://exmaple.com/?6",
+            "name,content_type,enabled,weight,button_class,link_text,link_url",
+            "Custom Link 4,dcim.site,True,100,blue,Link 4,http://exmaple.com/?4",
+            "Custom Link 5,dcim.site,True,100,blue,Link 5,http://exmaple.com/?5",
+            "Custom Link 6,dcim.site,False,100,blue,Link 6,http://exmaple.com/?6",
         )
 
         cls.bulk_edit_data = {
-            'button_class': CustomLinkButtonClassChoices.CLASS_CYAN,
+            'button_class': CustomLinkButtonClassChoices.CYAN,
+            'enabled': False,
             'weight': 200,
         }
 
@@ -145,6 +149,7 @@ class WebhookTestCase(ViewTestCases.PrimaryObjectViewTestCase):
             'payload_url': 'http://example.com/?x',
             'http_method': 'GET',
             'http_content_type': 'application/foo',
+            'conditions': None,
         }
 
         cls.csv_data = (

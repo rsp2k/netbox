@@ -2,8 +2,9 @@ from netaddr import IPNetwork, IPSet
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
+from dcim.models import Interface, Device, DeviceRole, DeviceType, Manufacturer, Site
 from ipam.choices import IPAddressRoleChoices, PrefixStatusChoices
-from ipam.models import Aggregate, IPAddress, IPRange, Prefix, RIR, VLAN, VLANGroup, VRF
+from ipam.models import Aggregate, IPAddress, IPRange, Prefix, RIR, VLAN, VLANGroup, VRF, L2VPN, L2VPNTermination
 
 
 class TestAggregate(TestCase):
@@ -185,6 +186,18 @@ class TestPrefix(TestCase):
         IPAddress.objects.create(address=IPNetwork('10.0.0.4/24'))
         self.assertEqual(parent_prefix.get_first_available_ip(), '10.0.0.5/24')
 
+    def test_get_first_available_ip_ipv6(self):
+        parent_prefix = Prefix.objects.create(prefix=IPNetwork('2001:db8:500::/64'))
+        self.assertEqual(parent_prefix.get_first_available_ip(), '2001:db8:500::1/64')
+
+    def test_get_first_available_ip_ipv6_rfc3627(self):
+        parent_prefix = Prefix.objects.create(prefix=IPNetwork('2001:db8:500:4::/126'))
+        self.assertEqual(parent_prefix.get_first_available_ip(), '2001:db8:500:4::1/126')
+
+    def test_get_first_available_ip_ipv6_rfc6164(self):
+        parent_prefix = Prefix.objects.create(prefix=IPNetwork('2001:db8:500:5::/127'))
+        self.assertEqual(parent_prefix.get_first_available_ip(), '2001:db8:500:5::/127')
+
     def test_get_utilization_container(self):
         prefixes = (
             Prefix(prefix=IPNetwork('10.0.0.0/24'), status=PrefixStatusChoices.STATUS_CONTAINER),
@@ -204,11 +217,11 @@ class TestPrefix(TestCase):
         IPAddress.objects.bulk_create([
             IPAddress(address=IPNetwork(f'10.0.0.{i}/24')) for i in range(1, 33)
         ])
-        self.assertEqual(prefix.get_utilization(), 12)  # 12.5% utilization
+        self.assertEqual(prefix.get_utilization(), 32 / 254 * 100)  # ~12.5% utilization
 
         # Create a child range with 32 additional IPs
         IPRange.objects.create(start_address=IPNetwork('10.0.0.33/24'), end_address=IPNetwork('10.0.0.64/24'))
-        self.assertEqual(prefix.get_utilization(), 25)  # 25% utilization
+        self.assertEqual(prefix.get_utilization(), 64 / 254 * 100)  # ~25% utilization
 
     #
     # Uniqueness enforcement tests
@@ -497,18 +510,105 @@ class TestIPAddress(TestCase):
 
 class TestVLANGroup(TestCase):
 
+    @classmethod
+    def setUpTestData(cls):
+        vlangroup = VLANGroup.objects.create(
+            name='VLAN Group 1',
+            slug='vlan-group-1',
+            min_vid=100,
+            max_vid=199
+        )
+        VLAN.objects.bulk_create((
+            VLAN(name='VLAN 100', vid=100, group=vlangroup),
+            VLAN(name='VLAN 101', vid=101, group=vlangroup),
+            VLAN(name='VLAN 102', vid=102, group=vlangroup),
+            VLAN(name='VLAN 103', vid=103, group=vlangroup),
+        ))
+
+    def test_get_available_vids(self):
+        vlangroup = VLANGroup.objects.first()
+        child_vids = VLAN.objects.filter(group=vlangroup).values_list('vid', flat=True)
+        self.assertEqual(len(child_vids), 4)
+
+        available_vids = vlangroup.get_available_vids()
+        self.assertListEqual(available_vids, list(range(104, 200)))
+
     def test_get_next_available_vid(self):
+        vlangroup = VLANGroup.objects.first()
+        self.assertEqual(vlangroup.get_next_available_vid(), 104)
 
-        vlangroup = VLANGroup.objects.create(name='VLAN Group 1', slug='vlan-group-1')
-        VLAN.objects.bulk_create((
-            VLAN(name='VLAN 1', vid=1, group=vlangroup),
-            VLAN(name='VLAN 2', vid=2, group=vlangroup),
-            VLAN(name='VLAN 3', vid=3, group=vlangroup),
-            VLAN(name='VLAN 5', vid=5, group=vlangroup),
-        ))
-        self.assertEqual(vlangroup.get_next_available_vid(), 4)
+        VLAN.objects.create(name='VLAN 104', vid=104, group=vlangroup)
+        self.assertEqual(vlangroup.get_next_available_vid(), 105)
 
-        VLAN.objects.bulk_create((
-            VLAN(name='VLAN 4', vid=4, group=vlangroup),
-        ))
-        self.assertEqual(vlangroup.get_next_available_vid(), 6)
+
+class TestL2VPNTermination(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+
+        site = Site.objects.create(name='Site 1')
+        manufacturer = Manufacturer.objects.create(name='Manufacturer 1')
+        device_type = DeviceType.objects.create(model='Device Type 1', manufacturer=manufacturer)
+        device_role = DeviceRole.objects.create(name='Switch')
+        device = Device.objects.create(
+            name='Device 1',
+            site=site,
+            device_type=device_type,
+            device_role=device_role,
+            status='active'
+        )
+
+        interfaces = (
+            Interface(name='Interface 1', device=device, type='1000baset'),
+            Interface(name='Interface 2', device=device, type='1000baset'),
+            Interface(name='Interface 3', device=device, type='1000baset'),
+            Interface(name='Interface 4', device=device, type='1000baset'),
+            Interface(name='Interface 5', device=device, type='1000baset'),
+        )
+
+        Interface.objects.bulk_create(interfaces)
+
+        vlans = (
+            VLAN(name='VLAN 1', vid=651),
+            VLAN(name='VLAN 2', vid=652),
+            VLAN(name='VLAN 3', vid=653),
+            VLAN(name='VLAN 4', vid=654),
+            VLAN(name='VLAN 5', vid=655),
+            VLAN(name='VLAN 6', vid=656),
+            VLAN(name='VLAN 7', vid=657)
+        )
+
+        VLAN.objects.bulk_create(vlans)
+
+        l2vpns = (
+            L2VPN(name='L2VPN 1', slug='l2vpn-1', type='vxlan', identifier=650001),
+            L2VPN(name='L2VPN 2', slug='l2vpn-2', type='vpws', identifier=650002),
+            L2VPN(name='L2VPN 3', slug='l2vpn-3', type='vpls'),  # No RD
+        )
+        L2VPN.objects.bulk_create(l2vpns)
+
+        l2vpnterminations = (
+            L2VPNTermination(l2vpn=l2vpns[0], assigned_object=vlans[0]),
+            L2VPNTermination(l2vpn=l2vpns[0], assigned_object=vlans[1]),
+            L2VPNTermination(l2vpn=l2vpns[0], assigned_object=vlans[2])
+        )
+
+        L2VPNTermination.objects.bulk_create(l2vpnterminations)
+
+    def test_duplicate_interface_terminations(self):
+        device = Device.objects.first()
+        interface = Interface.objects.filter(device=device).first()
+        l2vpn = L2VPN.objects.first()
+
+        L2VPNTermination.objects.create(l2vpn=l2vpn, assigned_object=interface)
+        duplicate = L2VPNTermination(l2vpn=l2vpn, assigned_object=interface)
+
+        self.assertRaises(ValidationError, duplicate.clean)
+
+    def test_duplicate_vlan_terminations(self):
+        vlan = Interface.objects.first()
+        l2vpn = L2VPN.objects.first()
+
+        L2VPNTermination.objects.create(l2vpn=l2vpn, assigned_object=vlan)
+        duplicate = L2VPNTermination(l2vpn=l2vpn, assigned_object=vlan)
+        self.assertRaises(ValidationError, duplicate.clean)

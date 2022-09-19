@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
+from circuits.models import Provider
 from dcim.models import Site
 from extras.validators import CustomValidator
 
@@ -66,26 +67,26 @@ custom_validator = MyValidator()
 
 class CustomValidatorTest(TestCase):
 
-    @override_settings(CUSTOM_VALIDATORS={'dcim.site': [min_validator]})
+    @override_settings(CUSTOM_VALIDATORS={'circuits.provider': [min_validator]})
     def test_configuration(self):
-        self.assertIn('dcim.site', settings.CUSTOM_VALIDATORS)
-        validator = settings.CUSTOM_VALIDATORS['dcim.site'][0]
+        self.assertIn('circuits.provider', settings.CUSTOM_VALIDATORS)
+        validator = settings.CUSTOM_VALIDATORS['circuits.provider'][0]
         self.assertIsInstance(validator, CustomValidator)
 
-    @override_settings(CUSTOM_VALIDATORS={'dcim.site': [min_validator]})
+    @override_settings(CUSTOM_VALIDATORS={'circuits.provider': [min_validator]})
     def test_min(self):
         with self.assertRaises(ValidationError):
-            Site(name='abcdef123', slug='abcdefghijk', asn=1).clean()
+            Provider(name='Provider 1', slug='provider-1', asn=1).clean()
 
-    @override_settings(CUSTOM_VALIDATORS={'dcim.site': [max_validator]})
+    @override_settings(CUSTOM_VALIDATORS={'circuits.provider': [max_validator]})
     def test_max(self):
         with self.assertRaises(ValidationError):
-            Site(name='abcdef123', slug='abcdefghijk', asn=65535).clean()
+            Provider(name='Provider 1', slug='provider-1', asn=65535).clean()
 
     @override_settings(CUSTOM_VALIDATORS={'dcim.site': [min_length_validator]})
     def test_min_length(self):
         with self.assertRaises(ValidationError):
-            Site(name='abc', slug='abc', asn=65000).clean()
+            Site(name='abc', slug='abc').clean()
 
     @override_settings(CUSTOM_VALIDATORS={'dcim.site': [max_length_validator]})
     def test_max_length(self):
@@ -119,3 +120,38 @@ class CustomValidatorTest(TestCase):
     @override_settings(CUSTOM_VALIDATORS={'dcim.site': [custom_validator]})
     def test_custom_valid(self):
         Site(name='foo', slug='foo').clean()
+
+
+class CustomValidatorConfigTest(TestCase):
+
+    @override_settings(
+        CUSTOM_VALIDATORS={
+            'dcim.site': [
+                {'name': {'min_length': 5}}
+            ]
+        }
+    )
+    def test_plain_data(self):
+        """
+        Test custom validator configuration using plain data (as opposed to a CustomValidator
+        class)
+        """
+        with self.assertRaises(ValidationError):
+            Site(name='abcd', slug='abcd').clean()
+        Site(name='abcde', slug='abcde').clean()
+
+    @override_settings(
+        CUSTOM_VALIDATORS={
+            'dcim.site': (
+                'extras.tests.test_customvalidator.MyValidator',
+            )
+        }
+    )
+    def test_dotted_path(self):
+        """
+        Test custom validator configuration using a dotted path (string) reference to a
+        CustomValidator class.
+        """
+        Site(name='foo', slug='foo').clean()
+        with self.assertRaises(ValidationError):
+            Site(name='bar', slug='bar').clean()

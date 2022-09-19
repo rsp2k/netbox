@@ -1,11 +1,14 @@
 from django import forms
+from django.utils.translation import gettext as _
 
 from circuits.choices import CircuitStatusChoices
 from circuits.models import *
-from extras.forms import AddRemoveTagsForm, CustomFieldModelBulkEditForm
+from ipam.models import ASN
+from netbox.forms import NetBoxModelBulkEditForm
 from tenancy.models import Tenant
 from utilities.forms import (
-    add_blank_choice, BootstrapMixin, CommentField, DynamicModelChoiceField, SmallTextarea, StaticSelect,
+    add_blank_choice, CommentField, DatePicker, DynamicModelChoiceField, DynamicModelMultipleChoiceField, SmallTextarea,
+    StaticSelect,
 )
 
 __all__ = (
@@ -16,14 +19,15 @@ __all__ = (
 )
 
 
-class ProviderBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldModelBulkEditForm):
-    pk = forms.ModelMultipleChoiceField(
-        queryset=Provider.objects.all(),
-        widget=forms.MultipleHiddenInput
-    )
+class ProviderBulkEditForm(NetBoxModelBulkEditForm):
     asn = forms.IntegerField(
         required=False,
-        label='ASN'
+        label='ASN (legacy)'
+    )
+    asns = DynamicModelMultipleChoiceField(
+        queryset=ASN.objects.all(),
+        label=_('ASNs'),
+        required=False
     )
     account = forms.CharField(
         max_length=30,
@@ -49,23 +53,27 @@ class ProviderBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldModelBu
         label='Comments'
     )
 
-    class Meta:
-        nullable_fields = [
-            'asn', 'account', 'portal_url', 'noc_contact', 'admin_contact', 'comments',
-        ]
-
-
-class ProviderNetworkBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldModelBulkEditForm):
-    pk = forms.ModelMultipleChoiceField(
-        queryset=ProviderNetwork.objects.all(),
-        widget=forms.MultipleHiddenInput
+    model = Provider
+    fieldsets = (
+        (None, ('asn', 'asns', 'account', 'portal_url', 'noc_contact', 'admin_contact')),
     )
+    nullable_fields = (
+        'asn', 'asns', 'account', 'portal_url', 'noc_contact', 'admin_contact', 'comments',
+    )
+
+
+class ProviderNetworkBulkEditForm(NetBoxModelBulkEditForm):
     provider = DynamicModelChoiceField(
         queryset=Provider.objects.all(),
         required=False
     )
-    description = forms.CharField(
+    service_id = forms.CharField(
         max_length=100,
+        required=False,
+        label='Service ID'
+    )
+    description = forms.CharField(
+        max_length=200,
         required=False
     )
     comments = CommentField(
@@ -73,31 +81,29 @@ class ProviderNetworkBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomField
         label='Comments'
     )
 
-    class Meta:
-        nullable_fields = [
-            'description', 'comments',
-        ]
-
-
-class CircuitTypeBulkEditForm(BootstrapMixin, CustomFieldModelBulkEditForm):
-    pk = forms.ModelMultipleChoiceField(
-        queryset=CircuitType.objects.all(),
-        widget=forms.MultipleHiddenInput
+    model = ProviderNetwork
+    fieldsets = (
+        (None, ('provider', 'service_id', 'description')),
     )
+    nullable_fields = (
+        'service_id', 'description', 'comments',
+    )
+
+
+class CircuitTypeBulkEditForm(NetBoxModelBulkEditForm):
     description = forms.CharField(
         max_length=200,
         required=False
     )
 
-    class Meta:
-        nullable_fields = ['description']
-
-
-class CircuitBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldModelBulkEditForm):
-    pk = forms.ModelMultipleChoiceField(
-        queryset=Circuit.objects.all(),
-        widget=forms.MultipleHiddenInput
+    model = CircuitType
+    fieldsets = (
+        (None, ('description',)),
     )
+    nullable_fields = ('description',)
+
+
+class CircuitBulkEditForm(NetBoxModelBulkEditForm):
     type = DynamicModelChoiceField(
         queryset=CircuitType.objects.all(),
         required=False
@@ -116,6 +122,14 @@ class CircuitBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldModelBul
         queryset=Tenant.objects.all(),
         required=False
     )
+    install_date = forms.DateField(
+        required=False,
+        widget=DatePicker()
+    )
+    termination_date = forms.DateField(
+        required=False,
+        widget=DatePicker()
+    )
     commit_rate = forms.IntegerField(
         required=False,
         label='Commit rate (Kbps)'
@@ -129,7 +143,12 @@ class CircuitBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldModelBul
         label='Comments'
     )
 
-    class Meta:
-        nullable_fields = [
-            'tenant', 'commit_rate', 'description', 'comments',
-        ]
+    model = Circuit
+    fieldsets = (
+        ('Circuit', ('provider', 'type', 'status', 'description')),
+        ('Service Parameters', ('install_date', 'termination_date', 'commit_rate')),
+        ('Tenancy', ('tenant',)),
+    )
+    nullable_fields = (
+        'tenant', 'commit_rate', 'description', 'comments',
+    )

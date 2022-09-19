@@ -1,11 +1,9 @@
 import django_tables2 as tables
 
 from dcim.models import Location, Region, Site, SiteGroup
-from tenancy.tables import TenantColumn
-from utilities.tables import (
-    BaseTable, ButtonsColumn, ChoiceFieldColumn, LinkedCountColumn, MarkdownColumn, MPTTColumn, TagColumn, ToggleColumn,
-)
-from .template_code import LOCATION_ELEVATIONS
+from netbox.tables import NetBoxTable, columns
+from tenancy.tables import TenancyColumnsMixin
+from .template_code import LOCATION_BUTTONS
 
 __all__ = (
     'LocationTable',
@@ -19,106 +17,139 @@ __all__ = (
 # Regions
 #
 
-class RegionTable(BaseTable):
-    pk = ToggleColumn()
-    name = MPTTColumn(
+class RegionTable(NetBoxTable):
+    name = columns.MPTTColumn(
         linkify=True
     )
-    site_count = LinkedCountColumn(
+    site_count = columns.LinkedCountColumn(
         viewname='dcim:site_list',
         url_params={'region_id': 'pk'},
         verbose_name='Sites'
     )
-    actions = ButtonsColumn(Region)
+    contacts = columns.ManyToManyColumn(
+        linkify_item=True
+    )
+    tags = columns.TagColumn(
+        url_name='dcim:region_list'
+    )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = Region
-        fields = ('pk', 'name', 'slug', 'site_count', 'description', 'actions')
-        default_columns = ('pk', 'name', 'site_count', 'description', 'actions')
+        fields = (
+            'pk', 'id', 'name', 'slug', 'site_count', 'description', 'contacts', 'tags', 'created', 'last_updated',
+            'actions',
+        )
+        default_columns = ('pk', 'name', 'site_count', 'description')
 
 
 #
 # Site groups
 #
 
-class SiteGroupTable(BaseTable):
-    pk = ToggleColumn()
-    name = MPTTColumn(
+class SiteGroupTable(NetBoxTable):
+    name = columns.MPTTColumn(
         linkify=True
     )
-    site_count = LinkedCountColumn(
+    site_count = columns.LinkedCountColumn(
         viewname='dcim:site_list',
         url_params={'group_id': 'pk'},
         verbose_name='Sites'
     )
-    actions = ButtonsColumn(SiteGroup)
+    contacts = columns.ManyToManyColumn(
+        linkify_item=True
+    )
+    tags = columns.TagColumn(
+        url_name='dcim:sitegroup_list'
+    )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = SiteGroup
-        fields = ('pk', 'name', 'slug', 'site_count', 'description', 'actions')
-        default_columns = ('pk', 'name', 'site_count', 'description', 'actions')
+        fields = (
+            'pk', 'id', 'name', 'slug', 'site_count', 'description', 'contacts', 'tags', 'created', 'last_updated',
+            'actions',
+        )
+        default_columns = ('pk', 'name', 'site_count', 'description')
 
 
 #
 # Sites
 #
 
-class SiteTable(BaseTable):
-    pk = ToggleColumn()
+class SiteTable(TenancyColumnsMixin, NetBoxTable):
     name = tables.Column(
         linkify=True
     )
-    status = ChoiceFieldColumn()
+    status = columns.ChoiceFieldColumn()
     region = tables.Column(
         linkify=True
     )
     group = tables.Column(
         linkify=True
     )
-    tenant = TenantColumn()
-    comments = MarkdownColumn()
-    tags = TagColumn(
+    asns = columns.ManyToManyColumn(
+        linkify_item=True,
+        verbose_name='ASNs'
+    )
+    asn_count = columns.LinkedCountColumn(
+        accessor=tables.A('asns__count'),
+        viewname='ipam:asn_list',
+        url_params={'site_id': 'pk'},
+        verbose_name='ASN Count'
+    )
+    comments = columns.MarkdownColumn()
+    contacts = columns.ManyToManyColumn(
+        linkify_item=True
+    )
+    tags = columns.TagColumn(
         url_name='dcim:site_list'
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = Site
         fields = (
-            'pk', 'name', 'slug', 'status', 'facility', 'region', 'group', 'tenant', 'asn', 'time_zone', 'description',
-            'physical_address', 'shipping_address', 'latitude', 'longitude', 'contact_name', 'contact_phone',
-            'contact_email', 'comments', 'tags',
+            'pk', 'id', 'name', 'slug', 'status', 'facility', 'region', 'group', 'tenant', 'tenant_group', 'asns', 'asn_count',
+            'time_zone', 'description', 'physical_address', 'shipping_address', 'latitude', 'longitude', 'comments',
+            'contacts', 'tags', 'created', 'last_updated', 'actions',
         )
-        default_columns = ('pk', 'name', 'status', 'facility', 'region', 'group', 'tenant', 'asn', 'description')
+        default_columns = ('pk', 'name', 'status', 'facility', 'region', 'group', 'tenant', 'description')
 
 
 #
 # Locations
 #
 
-class LocationTable(BaseTable):
-    pk = ToggleColumn()
-    name = MPTTColumn(
+class LocationTable(TenancyColumnsMixin, NetBoxTable):
+    name = columns.MPTTColumn(
         linkify=True
     )
     site = tables.Column(
         linkify=True
     )
-    rack_count = LinkedCountColumn(
+    status = columns.ChoiceFieldColumn()
+    rack_count = columns.LinkedCountColumn(
         viewname='dcim:rack_list',
         url_params={'location_id': 'pk'},
         verbose_name='Racks'
     )
-    device_count = LinkedCountColumn(
+    device_count = columns.LinkedCountColumn(
         viewname='dcim:device_list',
         url_params={'location_id': 'pk'},
         verbose_name='Devices'
     )
-    actions = ButtonsColumn(
-        model=Location,
-        prepend_template=LOCATION_ELEVATIONS
+    contacts = columns.ManyToManyColumn(
+        linkify_item=True
+    )
+    tags = columns.TagColumn(
+        url_name='dcim:location_list'
+    )
+    actions = columns.ActionsColumn(
+        extra_buttons=LOCATION_BUTTONS
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = Location
-        fields = ('pk', 'name', 'site', 'rack_count', 'device_count', 'description', 'slug', 'actions')
-        default_columns = ('pk', 'name', 'site', 'rack_count', 'device_count', 'description', 'actions')
+        fields = (
+            'pk', 'id', 'name', 'site', 'status', 'tenant', 'tenant_group', 'rack_count', 'device_count', 'description',
+            'slug', 'contacts', 'tags', 'actions', 'created', 'last_updated',
+        )
+        default_columns = ('pk', 'name', 'site', 'status', 'tenant', 'rack_count', 'device_count', 'description')

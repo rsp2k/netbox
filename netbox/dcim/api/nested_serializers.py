@@ -4,6 +4,8 @@ from dcim import models
 from netbox.api.serializers import BaseModelSerializer, WritableNestedSerializer
 
 __all__ = [
+    'ComponentNestedModuleSerializer',
+    'ModuleBayNestedModuleSerializer',
     'NestedCableSerializer',
     'NestedConsolePortSerializer',
     'NestedConsolePortTemplateSerializer',
@@ -19,7 +21,13 @@ __all__ = [
     'NestedInterfaceSerializer',
     'NestedInterfaceTemplateSerializer',
     'NestedInventoryItemSerializer',
+    'NestedInventoryItemRoleSerializer',
+    'NestedInventoryItemTemplateSerializer',
     'NestedManufacturerSerializer',
+    'NestedModuleBaySerializer',
+    'NestedModuleBayTemplateSerializer',
+    'NestedModuleSerializer',
+    'NestedModuleTypeSerializer',
     'NestedPlatformSerializer',
     'NestedPowerFeedSerializer',
     'NestedPowerOutletSerializer',
@@ -117,7 +125,7 @@ class NestedRackReservationSerializer(WritableNestedSerializer):
 
 
 #
-# Device types
+# Device/module types
 #
 
 class NestedManufacturerSerializer(WritableNestedSerializer):
@@ -138,6 +146,20 @@ class NestedDeviceTypeSerializer(WritableNestedSerializer):
         model = models.DeviceType
         fields = ['id', 'url', 'display', 'manufacturer', 'model', 'slug', 'device_count']
 
+
+class NestedModuleTypeSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:moduletype-detail')
+    manufacturer = NestedManufacturerSerializer(read_only=True)
+    # module_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = models.ModuleType
+        fields = ['id', 'url', 'display', 'manufacturer', 'model']
+
+
+#
+# Component templates
+#
 
 class NestedConsolePortTemplateSerializer(WritableNestedSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:consoleporttemplate-detail')
@@ -195,12 +217,29 @@ class NestedFrontPortTemplateSerializer(WritableNestedSerializer):
         fields = ['id', 'url', 'display', 'name']
 
 
+class NestedModuleBayTemplateSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:modulebaytemplate-detail')
+
+    class Meta:
+        model = models.ModuleBayTemplate
+        fields = ['id', 'url', 'display', 'name']
+
+
 class NestedDeviceBayTemplateSerializer(WritableNestedSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:devicebaytemplate-detail')
 
     class Meta:
         model = models.DeviceBayTemplate
         fields = ['id', 'url', 'display', 'name']
+
+
+class NestedInventoryItemTemplateSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:inventoryitemtemplate-detail')
+    _depth = serializers.IntegerField(source='level', read_only=True)
+
+    class Meta:
+        model = models.InventoryItemTemplate
+        fields = ['id', 'url', 'display', 'name', '_depth']
 
 
 #
@@ -235,9 +274,49 @@ class NestedDeviceSerializer(WritableNestedSerializer):
         fields = ['id', 'url', 'display', 'name']
 
 
+class ModuleNestedModuleBaySerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:modulebay-detail')
+
+    class Meta:
+        model = models.ModuleBay
+        fields = ['id', 'url', 'display', 'name']
+
+
+class ModuleBayNestedModuleSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:module-detail')
+
+    class Meta:
+        model = models.Module
+        fields = ['id', 'url', 'display', 'serial']
+
+
+class ComponentNestedModuleSerializer(WritableNestedSerializer):
+    """
+    Used by device component serializers.
+    """
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:module-detail')
+    module_bay = ModuleNestedModuleBaySerializer(read_only=True)
+
+    class Meta:
+        model = models.Module
+        fields = ['id', 'url', 'display', 'device', 'module_bay']
+
+
+class NestedModuleSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:module-detail')
+    device = NestedDeviceSerializer(read_only=True)
+    module_bay = ModuleNestedModuleBaySerializer(read_only=True)
+    module_type = NestedModuleTypeSerializer(read_only=True)
+
+    class Meta:
+        model = models.Module
+        fields = ['id', 'url', 'display', 'device', 'module_bay', 'module_type']
+
+
 class NestedConsoleServerPortSerializer(WritableNestedSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:consoleserverport-detail')
     device = NestedDeviceSerializer(read_only=True)
+    _occupied = serializers.BooleanField(required=False, read_only=True)
 
     class Meta:
         model = models.ConsoleServerPort
@@ -247,6 +326,7 @@ class NestedConsoleServerPortSerializer(WritableNestedSerializer):
 class NestedConsolePortSerializer(WritableNestedSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:consoleport-detail')
     device = NestedDeviceSerializer(read_only=True)
+    _occupied = serializers.BooleanField(required=False, read_only=True)
 
     class Meta:
         model = models.ConsolePort
@@ -256,6 +336,7 @@ class NestedConsolePortSerializer(WritableNestedSerializer):
 class NestedPowerOutletSerializer(WritableNestedSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:poweroutlet-detail')
     device = NestedDeviceSerializer(read_only=True)
+    _occupied = serializers.BooleanField(required=False, read_only=True)
 
     class Meta:
         model = models.PowerOutlet
@@ -265,6 +346,7 @@ class NestedPowerOutletSerializer(WritableNestedSerializer):
 class NestedPowerPortSerializer(WritableNestedSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:powerport-detail')
     device = NestedDeviceSerializer(read_only=True)
+    _occupied = serializers.BooleanField(required=False, read_only=True)
 
     class Meta:
         model = models.PowerPort
@@ -274,6 +356,7 @@ class NestedPowerPortSerializer(WritableNestedSerializer):
 class NestedInterfaceSerializer(WritableNestedSerializer):
     device = NestedDeviceSerializer(read_only=True)
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:interface-detail')
+    _occupied = serializers.BooleanField(required=False, read_only=True)
 
     class Meta:
         model = models.Interface
@@ -283,6 +366,7 @@ class NestedInterfaceSerializer(WritableNestedSerializer):
 class NestedRearPortSerializer(WritableNestedSerializer):
     device = NestedDeviceSerializer(read_only=True)
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:rearport-detail')
+    _occupied = serializers.BooleanField(required=False, read_only=True)
 
     class Meta:
         model = models.RearPort
@@ -292,10 +376,20 @@ class NestedRearPortSerializer(WritableNestedSerializer):
 class NestedFrontPortSerializer(WritableNestedSerializer):
     device = NestedDeviceSerializer(read_only=True)
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:frontport-detail')
+    _occupied = serializers.BooleanField(required=False, read_only=True)
 
     class Meta:
         model = models.FrontPort
         fields = ['id', 'url', 'display', 'device', 'name', 'cable', '_occupied']
+
+
+class NestedModuleBaySerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:modulebay-detail')
+    module = NestedModuleSerializer(read_only=True)
+
+    class Meta:
+        model = models.ModuleBay
+        fields = ['id', 'url', 'display', 'module', 'name']
 
 
 class NestedDeviceBaySerializer(WritableNestedSerializer):
@@ -315,6 +409,15 @@ class NestedInventoryItemSerializer(WritableNestedSerializer):
     class Meta:
         model = models.InventoryItem
         fields = ['id', 'url', 'display', 'device', 'name', '_depth']
+
+
+class NestedInventoryItemRoleSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='dcim-api:inventoryitemrole-detail')
+    inventoryitem_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = models.InventoryItemRole
+        fields = ['id', 'url', 'display', 'name', 'slug', 'inventoryitem_count']
 
 
 #
@@ -340,7 +443,7 @@ class NestedVirtualChassisSerializer(WritableNestedSerializer):
 
     class Meta:
         model = models.VirtualChassis
-        fields = ['id', 'name', 'url', 'master', 'member_count']
+        fields = ['id', 'url', 'display', 'name', 'master', 'member_count']
 
 
 #
@@ -358,6 +461,7 @@ class NestedPowerPanelSerializer(WritableNestedSerializer):
 
 class NestedPowerFeedSerializer(WritableNestedSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='dcim-api:powerfeed-detail')
+    _occupied = serializers.BooleanField(required=False, read_only=True)
 
     class Meta:
         model = models.PowerFeed

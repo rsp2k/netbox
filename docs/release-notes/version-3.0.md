@@ -1,6 +1,95 @@
 # NetBox v3.0
 
-## v3.0.9 (FUTURE)
+## v3.0.12 (2021-12-06)
+
+### Enhancements
+
+* [#7751](https://github.com/netbox-community/netbox/issues/7751) - Get API user from LDAP only when `FIND_GROUP_PERMS` is enabled
+* [#7885](https://github.com/netbox-community/netbox/issues/7885) - Linkify VLAN name in VLANs table
+* [#7892](https://github.com/netbox-community/netbox/issues/7892) - Add L22-30 power port & outlet types
+* [#7932](https://github.com/netbox-community/netbox/issues/7932) - Improve performance of the "quick find" function
+* [#7941](https://github.com/netbox-community/netbox/issues/7941) - Add multi-standard ITA power outlet type
+
+### Bug Fixes
+
+* [#7823](https://github.com/netbox-community/netbox/issues/7823) - Fix issue where `return_url` is not honored when 'Save & Continue' button is present
+* [#7981](https://github.com/netbox-community/netbox/issues/7981) - Fix Markdown sanitization regex
+
+---
+
+## v3.0.11 (2021-11-24)
+
+### Enhancements
+
+* [#2101](https://github.com/netbox-community/netbox/issues/2101) - Add missing `q` filters for necessary models
+* [#7424](https://github.com/netbox-community/netbox/issues/7424) - Add virtual chassis filters for device components
+* [#7531](https://github.com/netbox-community/netbox/issues/7531) - Add Markdown support for strikethrough formatting
+* [#7542](https://github.com/netbox-community/netbox/issues/7542) - Add optional VLAN group column to prefixes table
+* [#7803](https://github.com/netbox-community/netbox/issues/7803) - Improve live reloading of custom scripts
+* [#7810](https://github.com/netbox-community/netbox/issues/7810) - Add IEEE 802.15.1 interface type
+
+### Bug Fixes
+
+* [#7399](https://github.com/netbox-community/netbox/issues/7399) - Fix excessive CPU utilization when `AUTH_LDAP_FIND_GROUP_PERMS` is enabled
+* [#7657](https://github.com/netbox-community/netbox/issues/7657) - Make change logging middleware thread-safe
+* [#7720](https://github.com/netbox-community/netbox/issues/7720) - Fix initialization of custom script MultiObjectVar field with multiple values
+* [#7729](https://github.com/netbox-community/netbox/issues/7729) - Fix permissions evaluation when displaying VLAN group VLANs table
+* [#7739](https://github.com/netbox-community/netbox/issues/7739) - Fix exception when tracing cable across circuit with no far end termination
+* [#7813](https://github.com/netbox-community/netbox/issues/7813) - Fix handling of errors during export template rendering
+* [#7851](https://github.com/netbox-community/netbox/issues/7851) - Add missing cluster name filter for virtual machines
+* [#7857](https://github.com/netbox-community/netbox/issues/7857) - Fix ordering IP addresses by assignment status
+* [#7859](https://github.com/netbox-community/netbox/issues/7859) - Fix styling of form widgets under cable connection views
+* [#7864](https://github.com/netbox-community/netbox/issues/7864) - `power_port` can be null when creating power outlets via REST API
+* [#7865](https://github.com/netbox-community/netbox/issues/7865) - REST API should support null values for console port speeds
+
+---
+
+## v3.0.10 (2021-11-12)
+
+### Enhancements
+
+* [#7740](https://github.com/netbox-community/netbox/issues/7740) - Add mini-DIN 8 console port type
+* [#7760](https://github.com/netbox-community/netbox/issues/7760) - Add `vid` filter field to VLANs list
+* [#7767](https://github.com/netbox-community/netbox/issues/7767) - Add visual aids to interfaces table for type, enabled status
+
+### Bug Fixes
+
+* [#7564](https://github.com/netbox-community/netbox/issues/7564) - Fix assignment of members to virtual chassis with initial position of zero
+* [#7701](https://github.com/netbox-community/netbox/issues/7701) - Fix conflation of assigned IP status & role in interface tables
+* [#7741](https://github.com/netbox-community/netbox/issues/7741) - Fix 404 when attaching multiple images in succession
+* [#7752](https://github.com/netbox-community/netbox/issues/7752) - Fix minimum version check under Python v3.10
+* [#7766](https://github.com/netbox-community/netbox/issues/7766) - Add missing outer dimension columns to rack table
+* [#7780](https://github.com/netbox-community/netbox/issues/7780) - Preserve multi-line values during CSV file import
+* [#7783](https://github.com/netbox-community/netbox/issues/7783) - Fix indentation of locations under site view
+* [#7788](https://github.com/netbox-community/netbox/issues/7788) - Improve XSS mitigation in Markdown renderer
+* [#7791](https://github.com/netbox-community/netbox/issues/7791) - Enable sorting device bays table by installed device status
+* [#7802](https://github.com/netbox-community/netbox/issues/7802) - Differentiate ID and VID columns in VLANs table
+* [#7808](https://github.com/netbox-community/netbox/issues/7808) - Fix reference values for content type under custom field import form
+* [#7809](https://github.com/netbox-community/netbox/issues/7809) - Add missing export template support for various models
+* [#7814](https://github.com/netbox-community/netbox/issues/7814) - Fix restriction of user & group objects in GraphQL API queries
+
+---
+
+## v3.0.9 (2021-11-03)
+
+### Enhancements
+
+* [#6529](https://github.com/netbox-community/netbox/issues/6529) - Introduce the `runscript` management command
+* [#6930](https://github.com/netbox-community/netbox/issues/6930) - Add an optional "ID" column to all tables
+* [#7668](https://github.com/netbox-community/netbox/issues/7668) - Add "view elevations" button to location view
+
+### Bug Fixes
+
+* [#7599](https://github.com/netbox-community/netbox/issues/7599) - Improve color mode preference handling
+* [#7601](https://github.com/netbox-community/netbox/issues/7601) - Correct devices count for locations within global search results
+* [#7612](https://github.com/netbox-community/netbox/issues/7612) - Strip HTML from custom field descriptions
+* [#7628](https://github.com/netbox-community/netbox/issues/7628) - Fix `load_yaml` method for custom scripts
+* [#7643](https://github.com/netbox-community/netbox/issues/7643) - Fix circuit assignment when creating multiple terminations simultaneously
+* [#7644](https://github.com/netbox-community/netbox/issues/7644) - Prevent inadvertent deletion of prior change records when deleting objects (#7333 revisited)
+* [#7647](https://github.com/netbox-community/netbox/issues/7647) - Require interface assignment when designating IP address as primary for device/VM during CSV import
+* [#7664](https://github.com/netbox-community/netbox/issues/7664) - Preserve initial form data when bulk edit validation fails
+* [#7717](https://github.com/netbox-community/netbox/issues/7717) - Restore missing tags column on IP range table
+* [#7721](https://github.com/netbox-community/netbox/issues/7721) - Retain pagination preference when `MAX_PAGE_SIZE` is zero
 
 ---
 
@@ -268,7 +357,7 @@ And the response:
 ...
 ```
 
-All GraphQL requests are made at the `/graphql` URL (which also serves the GraphiQL UI). The API is currently read-only, however users who wish to disable it until needed can do so by setting the `GRAPHQL_ENABLED` configuration parameter to False. For more detail on NetBox's GraphQL implementation, see [the GraphQL API documentation](../graphql-api/overview.md).
+All GraphQL requests are made at the `/graphql` URL (which also serves the GraphiQL UI). The API is currently read-only, however users who wish to disable it until needed can do so by setting the `GRAPHQL_ENABLED` configuration parameter to False. For more detail on NetBox's GraphQL implementation, see [the GraphQL API documentation](../integrations/graphql-api.md).
 
 #### IP Ranges ([#834](https://github.com/netbox-community/netbox/issues/834))
 
@@ -278,7 +367,7 @@ More information about IP ranges is available [in the documentation](../models/i
 
 #### Custom Model Validation ([#5963](https://github.com/netbox-community/netbox/issues/5963))
 
-This release introduces the [`CUSTOM_VALIDATORS`](../configuration/optional-settings.md#custom_validators) configuration parameter, which allows administrators to map NetBox models to custom validator classes to enforce custom validation logic. For example, the following configuration requires every site to have a name of at least ten characters and a description:
+This release introduces the [`CUSTOM_VALIDATORS`](../configuration/data-validation.md#custom_validators) configuration parameter, which allows administrators to map NetBox models to custom validator classes to enforce custom validation logic. For example, the following configuration requires every site to have a name of at least ten characters and a description:
 
 ```python
 from extras.validators import CustomValidator
@@ -377,7 +466,7 @@ Note that NetBox's `rqworker` process will _not_ service custom queues by defaul
 * [#6154](https://github.com/netbox-community/netbox/issues/6154) - Allow decimal values for cable lengths
 * [#6328](https://github.com/netbox-community/netbox/issues/6328) - Build and serve documentation locally
 
-### Bug Fixes (from v3.2-beta2)
+### Bug Fixes (from v3.0-beta2)
 
 * [#6977](https://github.com/netbox-community/netbox/issues/6977) - Truncate global search dropdown on small screens
 * [#6979](https://github.com/netbox-community/netbox/issues/6979) - Hide "create & add another" button for circuit terminations

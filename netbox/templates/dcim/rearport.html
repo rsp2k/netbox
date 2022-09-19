@@ -1,6 +1,13 @@
-{% extends 'dcim/device_component.html' %}
+{% extends 'generic/object.html' %}
 {% load helpers %}
 {% load plugins %}
+
+{% block breadcrumbs %}
+  {{ block.super }}
+  <li class="breadcrumb-item">
+    <a href="{% url 'dcim:device_rearports' pk=object.device.pk %}">{{ object.device }}</a>
+  </li>
+{% endblock %}
 
 {% block content %}
     <div class="row">
@@ -13,9 +20,11 @@
                     <table class="table table-hover attr-table">
                         <tr>
                             <th scope="row">Device</th>
-                            <td>
-                                <a href="{{ object.device.get_absolute_url }}">{{ object.device }}</a>
-                            </td>
+                            <td>{{ object.device|linkify }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Module</th>
+                            <td>{{ object.module|linkify|placeholder }}</td>
                         </tr>
                         <tr>
                             <th scope="row">Name</th>
@@ -32,7 +41,11 @@
                         <tr>
                           <th scope="row">Color</th>
                           <td>
-                            <span class="badge color-label" style="background-color: #{{ object.color }}">&nbsp;</span>
+                            {% if object.color %}
+                              <span class="badge color-label" style="background-color: #{{ object.color }}">&nbsp;</span>
+                            {% else %}
+                              {{ ''|placeholder }}
+                            {% endif %}
                           </td>
                         </tr>
                         <tr>
@@ -46,8 +59,8 @@
                     </table>
                 </div>
             </div>
-            {% include 'inc/custom_fields_panel.html' %}
-            {% include 'extras/inc/tags_panel.html' with tags=object.tags.all %}
+            {% include 'inc/panels/custom_fields.html' %}
+            {% include 'inc/panels/tags.html' %}
             {% plugin_left_page object %}
         </div>
         <div class="col col-md-6">
@@ -65,7 +78,7 @@
                         <tr>
                             <th scope="row">Cable</th>
                             <td>
-                                <a href="{{ object.cable.get_absolute_url }}">{{ object.cable }}</a>
+                                {{ object.cable|linkify }}
                                 <a href="{% url 'dcim:rearport_trace' pk=object.pk %}" class="btn btn-primary btn-sm lh-1" title="Trace">
                                     <i class="mdi mdi-transit-connection-variant" aria-hidden="true"></i>
                                 </a>
@@ -92,16 +105,16 @@
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end">
                                     <li>
-                                        <a class="dropdown-link" href="{% url 'dcim:rearport_connect' termination_a_id=object.pk termination_b_type='interface' %}?return_url={{ object.get_absolute_url }}">Interface</a>
+                                        <a class="dropdown-link" href="{% url 'dcim:cable_add' %}?a_terminations_type=dcim.rearport&a_terminations={{ object.pk }}&b_terminations_type=dcim.interface&termination_b_site={{ object.device.site.pk }}&termination_b_rack={{ object.device.rack.pk }}&return_url={{ object.get_absolute_url }}">Interface</a>
                                     </li>
                                     <li>
-                                        <a class="dropdown-link" href="{% url 'dcim:rearport_connect' termination_a_id=object.pk termination_b_type='front-port' %}?return_url={{ object.get_absolute_url }}">Front Port</a>
+                                        <a class="dropdown-link" href="{% url 'dcim:cable_add' %}?a_terminations_type=dcim.rearport&a_terminations={{ object.pk }}&b_terminations_type=dcim.frontport&termination_b_site={{ object.device.site.pk }}&termination_b_rack={{ object.device.rack.pk }}&return_url={{ object.get_absolute_url }}">Front Port</a>
                                     </li>
                                     <li>
-                                        <a class="dropdown-link" href="{% url 'dcim:rearport_connect' termination_a_id=object.pk termination_b_type='rear-port' %}?return_url={{ object.get_absolute_url }}">Rear Port</a>
+                                        <a class="dropdown-link" href="{% url 'dcim:cable_add' %}?a_terminations_type=dcim.rearport&a_terminations={{ object.pk }}&b_terminations_type=dcim.rearport&termination_b_site={{ object.device.site.pk }}&termination_b_rack={{ object.device.rack.pk }}&return_url={{ object.get_absolute_url }}">Rear Port</a>
                                     </li>
                                     <li>
-                                        <a class="dropdown-link" href="{% url 'dcim:rearport_connect' termination_a_id=object.pk termination_b_type='circuit-termination' %}?return_url={{ object.get_absolute_url }}">Circuit Termination</a>
+                                        <a class="dropdown-link" href="{% url 'dcim:cable_add' %}?a_terminations_type=dcim.rearport&a_terminations={{ object.pk }}&b_terminations_type=circuits.circuittermination&termination_b_site={{ object.device.site.pk }}&return_url={{ object.get_absolute_url }}">Circuit Termination</a>
                                     </li>
                                 </ul>
                             </span>
@@ -110,6 +123,7 @@
                 {% endif %}
                 </div>
             </div>
+            {% include 'dcim/inc/panels/inventory_items.html' %}
             {% plugin_right_page object %}
         </div>
     </div>

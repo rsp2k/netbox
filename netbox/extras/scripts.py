@@ -3,9 +3,9 @@ import json
 import logging
 import os
 import pkgutil
+import sys
 import traceback
-import warnings
-from collections import OrderedDict
+import threading
 
 import yaml
 from django import forms
@@ -13,15 +13,14 @@ from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import transaction
 from django.utils.functional import classproperty
-from django_rq import job
 
 from extras.api.serializers import ScriptOutputSerializer
 from extras.choices import JobResultStatusChoices, LogLevelChoices
-from extras.models import JobResult
+from extras.signals import clear_webhooks
 from ipam.formfields import IPAddressFormField, IPNetworkFormField
 from ipam.validators import MaxPrefixLengthValidator, MinPrefixLengthValidator, prefix_validator
 from utilities.exceptions import AbortTransaction
-from utilities.forms import DynamicModelChoiceField, DynamicModelMultipleChoiceField
+from utilities.forms import add_blank_choice, DynamicModelChoiceField, DynamicModelMultipleChoiceField
 from .context_managers import change_logging
 from .forms import ScriptForm
 
@@ -41,6 +40,8 @@ __all__ = [
     'StringVar',
     'TextVar',
 ]
+
+lock = threading.Lock()
 
 
 #
@@ -164,15 +165,21 @@ class ChoiceVar(ScriptVariable):
     def __init__(self, choices, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Set field choices
-        self.field_attrs['choices'] = choices
+        # Set field choices, adding a blank choice to avoid forced selections
+        self.field_attrs['choices'] = add_blank_choice(choices)
 
 
-class MultiChoiceVar(ChoiceVar):
+class MultiChoiceVar(ScriptVariable):
     """
     Like ChoiceVar, but allows for the selection of multiple choices.
     """
     form_field = forms.MultipleChoiceField
+
+    def __init__(self, choices, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Set field choices
+        self.field_attrs['choices'] = choices
 
 
 class ObjectVar(ScriptVariable):
@@ -253,6 +260,10 @@ class BaseScript:
     Base model for custom scripts. User classes should inherit from this model if they want to extend Script
     functionality for use in other subclasses.
     """
+
+    # Prevent django from instantiating the class on all accesses
+    do_not_call_in_templates = True
+
     class Meta:
         pass
 
@@ -274,7 +285,7 @@ class BaseScript:
 
     @classproperty
     def name(self):
-        return getattr(self.Meta, 'name', self.__class__.__name__)
+        return getattr(self.Meta, 'name', self.__name__)
 
     @classproperty
     def full_name(self):
@@ -289,13 +300,37 @@ class BaseScript:
         return cls.__module__
 
     @classmethod
-    def _get_vars(cls):
-        vars = OrderedDict()
-        for name, attr in cls.__dict__.items():
-            if name not in vars and issubclass(attr.__class__, ScriptVariable):
-                vars[name] = attr
+    def root_module(cls):
+        return cls.__module__.split(".")[0]
 
-        return vars
+    @classproperty
+    def job_timeout(self):
+        return getattr(self.Meta, 'job_timeout', None)
+
+    @classmethod
+    def _get_vars(cls):
+        vars = {}
+
+        # Iterate all base classes looking for ScriptVariables
+        for base_class in inspect.getmro(cls):
+            # When object is reached there's no reason to continue
+            if base_class is object:
+                break
+
+            for name, attr in base_class.__dict__.items():
+                if name not in vars and issubclass(attr.__class__, ScriptVariable):
+                    vars[name] = attr
+
+        # Order variables according to field_order
+        field_order = getattr(cls.Meta, 'field_order', None)
+        if not field_order:
+            return vars
+        ordered_vars = {
+            field: vars.pop(field) for field in field_order if field in vars
+        }
+        ordered_vars.update(vars)
+
+        return ordered_vars
 
     def run(self, data, commit):
         raise NotImplementedError("The script must define a run() method.")
@@ -345,9 +380,14 @@ class BaseScript:
         """
         Return data from a YAML file
         """
+        try:
+            from yaml import CLoader as Loader
+        except ImportError:
+            from yaml import Loader
+
         file_path = os.path.join(settings.SCRIPTS_ROOT, filename)
         with open(file_path, 'r') as datafile:
-            data = yaml.load(datafile)
+            data = yaml.load(datafile, Loader=Loader)
 
         return data
 
@@ -390,7 +430,6 @@ def is_variable(obj):
     return isinstance(obj, ScriptVariable)
 
 
-@job('default')
 def run_script(data, request, commit=True, *args, **kwargs):
     """
     A wrapper for calling Script.run(). This performs error handling and provides a hook for committing changes. It
@@ -430,7 +469,7 @@ def run_script(data, request, commit=True, *args, **kwargs):
 
         except AbortTransaction:
             script.log_info("Database changes have been reverted automatically.")
-
+            clear_webhooks.send(request)
         except Exception as e:
             stacktrace = traceback.format_exc()
             script.log_failure(
@@ -439,7 +478,7 @@ def run_script(data, request, commit=True, *args, **kwargs):
             script.log_info("Database changes have been reverted due to error.")
             logger.error(f"Exception raised during script execution: {e}")
             job_result.set_status(JobResultStatusChoices.STATUS_ERRORED)
-
+            clear_webhooks.send(request)
         finally:
             job_result.data = ScriptOutputSerializer(script).data
             job_result.save()
@@ -454,34 +493,34 @@ def run_script(data, request, commit=True, *args, **kwargs):
     else:
         _run_script()
 
-    # Delete any previous terminal state results
-    JobResult.objects.filter(
-        obj_type=job_result.obj_type,
-        name=job_result.name,
-        status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-    ).exclude(
-        pk=job_result.pk
-    ).delete()
-
 
 def get_scripts(use_names=False):
     """
     Return a dict of dicts mapping all scripts to their modules. Set use_names to True to use each module's human-
     defined name in place of the actual module name.
     """
-    scripts = OrderedDict()
-    # Iterate through all modules within the reports path. These are the user-created files in which reports are
+    scripts = {}
+    # Iterate through all modules within the scripts path. These are the user-created files in which reports are
     # defined.
     for importer, module_name, _ in pkgutil.iter_modules([settings.SCRIPTS_ROOT]):
-        module = importer.find_module(module_name).load_module(module_name)
+        # Use a lock as removing and loading modules is not thread safe
+        with lock:
+            # Remove cached module to ensure consistency with filesystem
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+
+            module = importer.find_module(module_name).load_module(module_name)
+
         if use_names and hasattr(module, 'name'):
             module_name = module.name
-        module_scripts = OrderedDict()
+        module_scripts = {}
         script_order = getattr(module, "script_order", ())
         ordered_scripts = [cls for cls in script_order if is_script(cls)]
         unordered_scripts = [cls for _, cls in inspect.getmembers(module, is_script) if cls not in script_order]
         for cls in [*ordered_scripts, *unordered_scripts]:
-            module_scripts[cls.__name__] = cls
+            # For scripts in submodules use the full import path w/o the root module as the name
+            script_name = cls.full_name.split(".", maxsplit=1)[1]
+            module_scripts[script_name] = cls
         if module_scripts:
             scripts[module_name] = module_scripts
 

@@ -1,21 +1,40 @@
 from rest_framework import serializers
 
 from ipam import models
-from netbox.api import WritableNestedSerializer
+from ipam.models.l2vpn import L2VPNTermination, L2VPN
+from netbox.api.serializers import WritableNestedSerializer
 
 __all__ = [
     'NestedAggregateSerializer',
+    'NestedASNSerializer',
+    'NestedFHRPGroupSerializer',
+    'NestedFHRPGroupAssignmentSerializer',
     'NestedIPAddressSerializer',
     'NestedIPRangeSerializer',
+    'NestedL2VPNSerializer',
+    'NestedL2VPNTerminationSerializer',
     'NestedPrefixSerializer',
     'NestedRIRSerializer',
     'NestedRoleSerializer',
     'NestedRouteTargetSerializer',
     'NestedServiceSerializer',
+    'NestedServiceTemplateSerializer',
     'NestedVLANGroupSerializer',
     'NestedVLANSerializer',
     'NestedVRFSerializer',
 ]
+
+
+#
+# ASNs
+#
+
+class NestedASNSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:asn-detail')
+
+    class Meta:
+        model = models.ASN
+        fields = ['id', 'url', 'display', 'asn']
 
 
 #
@@ -63,6 +82,26 @@ class NestedAggregateSerializer(WritableNestedSerializer):
     class Meta:
         model = models.Aggregate
         fields = ['id', 'url', 'display', 'family', 'prefix']
+
+
+#
+# FHRP groups
+#
+
+class NestedFHRPGroupSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:fhrpgroup-detail')
+
+    class Meta:
+        model = models.FHRPGroup
+        fields = ['id', 'url', 'display', 'protocol', 'group_id']
+
+
+class NestedFHRPGroupAssignmentSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:fhrpgroupassignment-detail')
+
+    class Meta:
+        model = models.FHRPGroupAssignment
+        fields = ['id', 'url', 'display', 'interface_type', 'interface_id', 'group_id', 'priority']
 
 
 #
@@ -140,9 +179,42 @@ class NestedIPAddressSerializer(WritableNestedSerializer):
 # Services
 #
 
+class NestedServiceTemplateSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:servicetemplate-detail')
+
+    class Meta:
+        model = models.ServiceTemplate
+        fields = ['id', 'url', 'display', 'name', 'protocol', 'ports']
+
+
 class NestedServiceSerializer(WritableNestedSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='ipam-api:service-detail')
 
     class Meta:
         model = models.Service
         fields = ['id', 'url', 'display', 'name', 'protocol', 'ports']
+
+#
+# L2VPN
+#
+
+
+class NestedL2VPNSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:l2vpn-detail')
+
+    class Meta:
+        model = L2VPN
+        fields = [
+            'id', 'url', 'display', 'identifier', 'name', 'slug', 'type'
+        ]
+
+
+class NestedL2VPNTerminationSerializer(WritableNestedSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:l2vpntermination-detail')
+    l2vpn = NestedL2VPNSerializer()
+
+    class Meta:
+        model = L2VPNTermination
+        fields = [
+            'id', 'url', 'display', 'l2vpn'
+        ]

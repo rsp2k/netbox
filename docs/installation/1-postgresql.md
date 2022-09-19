@@ -2,8 +2,8 @@
 
 This section entails the installation and configuration of a local PostgreSQL database. If you already have a PostgreSQL database service in place, skip to [the next section](2-redis.md).
 
-!!! warning
-    NetBox requires PostgreSQL 9.6 or higher. Please note that MySQL and other relational databases are **not** currently supported.
+!!! warning "PostgreSQL 10 or later required"
+    NetBox requires PostgreSQL 10 or later. Please note that MySQL and other relational databases are **not** supported.
 
 ## Installation
 
@@ -21,9 +21,6 @@ This section entails the installation and configuration of a local PostgreSQL da
     sudo postgresql-setup --initdb
     ```
 
-    !!! info
-        PostgreSQL 9.6 and later are available natively on CentOS 8.2. If using an earlier CentOS release, you may need to [install it from an RPM](https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/).
-
     CentOS configures ident host-based authentication for PostgreSQL by default. Because NetBox will need to authenticate using a username and password, modify `/var/lib/pgsql/data/pg_hba.conf` to support MD5 authentication by changing `ident` to `md5` for the lines below:
 
     ```no-highlight
@@ -36,6 +33,12 @@ Once PostgreSQL has been installed, start the service and enable it to run at bo
 ```no-highlight
 sudo systemctl start postgresql
 sudo systemctl enable postgresql
+```
+
+Before continuing, verify that you have installed PostgreSQL 10 or later:
+
+```no-highlight
+psql -V
 ```
 
 ## Database Creation
@@ -54,7 +57,7 @@ CREATE USER netbox WITH PASSWORD 'J5brHrAXFLQSif0K';
 GRANT ALL PRIVILEGES ON DATABASE netbox TO netbox;
 ```
 
-!!! danger
+!!! danger "Use a strong password"
     **Do not use the password from the example.** Choose a strong, random password to ensure secure database authentication for your NetBox installation.
 
 Once complete, enter `\q` to exit the PostgreSQL shell.

@@ -4,20 +4,34 @@ from .constants import *
 from .models import Prefix, VLAN
 
 
-def add_available_prefixes(parent, prefix_list):
+def add_requested_prefixes(parent, prefix_list, show_available=True, show_assigned=True):
     """
-    Create fake Prefix objects for all unallocated space within a prefix.
+    Return a list of requested prefixes using show_available, show_assigned filters. If available prefixes are
+    requested, create fake Prefix objects for all unallocated space within a prefix.
+
+    :param parent: Parent Prefix instance
+    :param prefix_list: Child prefixes list
+    :param show_available: Include available prefixes.
+    :param show_assigned: Show assigned prefixes.
     """
+    child_prefixes = []
 
-    # Find all unallocated space
-    available_prefixes = netaddr.IPSet(parent) ^ netaddr.IPSet([p.prefix for p in prefix_list])
-    available_prefixes = [Prefix(prefix=p, status=None) for p in available_prefixes.iter_cidrs()]
+    # Add available prefixes to the table if requested
+    if prefix_list and show_available:
 
-    # Concatenate and sort complete list of children
-    prefix_list = list(prefix_list) + available_prefixes
-    prefix_list.sort(key=lambda p: p.prefix)
+        # Find all unallocated space, add fake Prefix objects to child_prefixes.
+        available_prefixes = netaddr.IPSet(parent) ^ netaddr.IPSet([p.prefix for p in prefix_list])
+        available_prefixes = [Prefix(prefix=p, status=None) for p in available_prefixes.iter_cidrs()]
+        child_prefixes = child_prefixes + available_prefixes
 
-    return prefix_list
+    # Add assigned prefixes to the table if requested
+    if prefix_list and show_assigned:
+        child_prefixes = child_prefixes + list(prefix_list)
+
+    # Sort child prefixes after additions
+    child_prefixes.sort(key=lambda p: p.prefix)
+
+    return child_prefixes
 
 
 def add_available_ipaddresses(prefix, ipaddress_list, is_pool=False):
@@ -72,14 +86,17 @@ def add_available_vlans(vlans, vlan_group=None):
     """
     Create fake records for all gaps between used VLANs
     """
+    min_vid = vlan_group.min_vid if vlan_group else VLAN_VID_MIN
+    max_vid = vlan_group.max_vid if vlan_group else VLAN_VID_MAX
+
     if not vlans:
         return [{
-            'vid': VLAN_VID_MIN,
+            'vid': min_vid,
             'vlan_group': vlan_group,
-            'available': VLAN_VID_MAX - VLAN_VID_MIN + 1
+            'available': max_vid - min_vid + 1
         }]
 
-    prev_vid = VLAN_VID_MAX
+    prev_vid = max_vid
     new_vlans = []
     for vlan in vlans:
         if vlan.vid - prev_vid > 1:
@@ -90,17 +107,17 @@ def add_available_vlans(vlans, vlan_group=None):
             })
         prev_vid = vlan.vid
 
-    if vlans[0].vid > VLAN_VID_MIN:
+    if vlans[0].vid > min_vid:
         new_vlans.append({
-            'vid': VLAN_VID_MIN,
+            'vid': min_vid,
             'vlan_group': vlan_group,
-            'available': vlans[0].vid - VLAN_VID_MIN,
+            'available': vlans[0].vid - min_vid,
         })
-    if prev_vid < VLAN_VID_MAX:
+    if prev_vid < max_vid:
         new_vlans.append({
             'vid': prev_vid + 1,
             'vlan_group': vlan_group,
-            'available': VLAN_VID_MAX - prev_vid,
+            'available': max_vid - prev_vid,
         })
 
     vlans = list(vlans) + new_vlans

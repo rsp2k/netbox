@@ -1,6 +1,15 @@
 {% extends 'generic/object.html' %}
 {% load helpers %}
 {% load plugins %}
+{% load render_table from django_tables2 %}
+
+{% block extra_controls %}
+  {% if perms.ipam.add_prefix %}
+    <a href="{% url 'ipam:prefix_add' %}?role={{ object.pk }}" class="btn btn-sm btn-primary">
+      <span class="mdi mdi-plus-thick" aria-hidden="true"></span> Add Prefix
+    </a>
+  {% endif %}
+{% endblock extra_controls %}
 
 {% block content %}
 <div class="row mb-3">
@@ -29,34 +38,50 @@
               <a href="{% url 'ipam:prefix_list' %}?role_id={{ object.pk }}">{{ prefixes_table.rows|length }}</a>
             </td>
           </tr>
+          <tr>
+            <th scope="row">IP Ranges</th>
+            <td>
+              {% with ipranges_count=object.ip_ranges.count %}
+                {% if ipranges_count %}
+                  <a href="{% url 'ipam:iprange_list' %}?role_id={{ object.pk }}">{{ ipranges_count }}</a>
+                {% else %}
+                  {{ ''|placeholder }}
+                {% endif %}
+              {% endwith %}
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">VLANs</th>
+            <td>
+              {% with vlans_count=object.vlans.count %}
+                {% if vlans_count %}
+                  <a href="{% url 'ipam:vlan_list' %}?role_id={{ object.pk }}">{{ vlans_count }}</a>
+                {% else %}
+                  {{ ''|placeholder }}
+                {% endif %}
+              {% endwith %}
+            </td>
+          </tr>
         </table>
       </div>
     </div>
+    {% include 'inc/panels/tags.html' %}
     {% plugin_left_page object %}
 	</div>
 	<div class="col col-md-6">
-    {% include 'inc/custom_fields_panel.html' %}
+    {% include 'inc/panels/custom_fields.html' %}
     {% plugin_right_page object %}
   </div>
 </div>
 <div class="row mb-3">
 	<div class="col col-md-12">
     <div class="card">
-      <h5 class="card-header">
-        Prefixes
-      </h5>
-      <div class="card-body">
-        {% include 'inc/table.html' with table=prefixes_table %}
+      <h5 class="card-header">Prefixes</h5>
+      <div class="card-body table-responsive">
+        {% render_table prefixes_table 'inc/table.html' %}
+        {% include 'inc/paginator.html' with paginator=prefixes_table.paginator page=prefixes_table.page %}
       </div>
-      {% if perms.ipam.add_prefix %}
-        <div class="card-footer text-end noprint">
-          <a href="{% url 'ipam:prefix_add' %}?role={{ object.pk }}" class="btn btn-sm btn-primary">
-            <span class="mdi mdi-plus-thick" aria-hidden="true"></span> Add Prefix
-          </a>
-        </div>
-      {% endif %}
     </div>
-    {% include 'inc/paginator.html' with paginator=prefixes_table.paginator page=prefixes_table.page %}
     {% plugin_full_width_page object %}
   </div>
 </div>

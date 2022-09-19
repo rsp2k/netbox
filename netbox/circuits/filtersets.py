@@ -1,11 +1,11 @@
 import django_filters
 from django.db.models import Q
 
-from dcim.filtersets import CableTerminationFilterSet
+from dcim.filtersets import CabledObjectFilterSet
 from dcim.models import Region, Site, SiteGroup
-from extras.filters import TagFilter
-from netbox.filtersets import ChangeLoggedModelFilterSet, OrganizationalModelFilterSet, PrimaryModelFilterSet
-from tenancy.filtersets import TenancyFilterSet
+from ipam.models import ASN
+from netbox.filtersets import NetBoxModelFilterSet, OrganizationalModelFilterSet
+from tenancy.filtersets import ContactModelFilterSet, TenancyFilterSet
 from utilities.filters import TreeNodeMultipleChoiceFilter
 from .choices import *
 from .models import *
@@ -19,11 +19,7 @@ __all__ = (
 )
 
 
-class ProviderFilterSet(PrimaryModelFilterSet):
-    q = django_filters.CharFilter(
-        method='search',
-        label='Search',
-    )
+class ProviderFilterSet(NetBoxModelFilterSet, ContactModelFilterSet):
     region_id = TreeNodeMultipleChoiceFilter(
         queryset=Region.objects.all(),
         field_name='circuits__terminations__site__region',
@@ -61,7 +57,11 @@ class ProviderFilterSet(PrimaryModelFilterSet):
         to_field_name='slug',
         label='Site (slug)',
     )
-    tag = TagFilter()
+    asn_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='asns',
+        queryset=ASN.objects.all(),
+        label='ASN (ID)',
+    )
 
     class Meta:
         model = Provider
@@ -79,11 +79,7 @@ class ProviderFilterSet(PrimaryModelFilterSet):
         )
 
 
-class ProviderNetworkFilterSet(PrimaryModelFilterSet):
-    q = django_filters.CharFilter(
-        method='search',
-        label='Search',
-    )
+class ProviderNetworkFilterSet(NetBoxModelFilterSet):
     provider_id = django_filters.ModelMultipleChoiceFilter(
         queryset=Provider.objects.all(),
         label='Provider (ID)',
@@ -94,17 +90,17 @@ class ProviderNetworkFilterSet(PrimaryModelFilterSet):
         to_field_name='slug',
         label='Provider (slug)',
     )
-    tag = TagFilter()
 
     class Meta:
         model = ProviderNetwork
-        fields = ['id', 'name']
+        fields = ['id', 'name', 'service_id', 'description']
 
     def search(self, queryset, name, value):
         if not value.strip():
             return queryset
         return queryset.filter(
             Q(name__icontains=value) |
+            Q(service_id__icontains=value) |
             Q(description__icontains=value) |
             Q(comments__icontains=value)
         ).distinct()
@@ -114,14 +110,10 @@ class CircuitTypeFilterSet(OrganizationalModelFilterSet):
 
     class Meta:
         model = CircuitType
-        fields = ['id', 'name', 'slug']
+        fields = ['id', 'name', 'slug', 'description']
 
 
-class CircuitFilterSet(PrimaryModelFilterSet, TenancyFilterSet):
-    q = django_filters.CharFilter(
-        method='search',
-        label='Search',
-    )
+class CircuitFilterSet(NetBoxModelFilterSet, TenancyFilterSet, ContactModelFilterSet):
     provider_id = django_filters.ModelMultipleChoiceFilter(
         queryset=Provider.objects.all(),
         label='Provider (ID)',
@@ -188,11 +180,10 @@ class CircuitFilterSet(PrimaryModelFilterSet, TenancyFilterSet):
         to_field_name='slug',
         label='Site (slug)',
     )
-    tag = TagFilter()
 
     class Meta:
         model = Circuit
-        fields = ['id', 'cid', 'install_date', 'commit_rate']
+        fields = ['id', 'cid', 'description', 'install_date', 'termination_date', 'commit_rate']
 
     def search(self, queryset, name, value):
         if not value.strip():
@@ -207,7 +198,7 @@ class CircuitFilterSet(PrimaryModelFilterSet, TenancyFilterSet):
         ).distinct()
 
 
-class CircuitTerminationFilterSet(ChangeLoggedModelFilterSet, CableTerminationFilterSet):
+class CircuitTerminationFilterSet(NetBoxModelFilterSet, CabledObjectFilterSet):
     q = django_filters.CharFilter(
         method='search',
         label='Search',
@@ -233,7 +224,7 @@ class CircuitTerminationFilterSet(ChangeLoggedModelFilterSet, CableTerminationFi
 
     class Meta:
         model = CircuitTermination
-        fields = ['id', 'term_side', 'port_speed', 'upstream_speed', 'xconnect_id']
+        fields = ['id', 'term_side', 'port_speed', 'upstream_speed', 'xconnect_id', 'description', 'cable_end']
 
     def search(self, queryset, name, value):
         if not value.strip():

@@ -2,6 +2,7 @@
 {% load static %}
 {% load helpers %}
 {% load plugins %}
+{% load render_table from django_tables2 %}
 
 {% block breadcrumbs %}
   {{ block.super }}
@@ -9,7 +10,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="row">
+<div class="row mb-3">
 	  <div class="col col-md-6">
         <div class="card">
             <h5 class="card-header">
@@ -19,13 +20,15 @@
                 <table class="table table-hover attr-table">
                     <tr>
                         <th scope="row">Provider</th>
-                        <td>
-                            <a href="{{ object.provider.get_absolute_url }}">{{ object.provider }}</a>
-                        </td>
+                        <td>{{ object.provider|linkify }}</td>
                     </tr>
                     <tr>
                         <th scope="row">Name</th>
                         <td>{{ object.name }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Service ID</th>
+                        <td>{{ object.service_id|placeholder }}</td>
                     </tr>
                     <tr>
                         <th scope="row">Description</th>
@@ -37,28 +40,22 @@
         {% plugin_left_page object %}
     </div>
     <div class="col col-md-6">
-        {% include 'inc/custom_fields_panel.html' %}
-        {% include 'extras/inc/tags_panel.html' with tags=object.tags.all url='circuits:providernetwork_list' %}
-        {% include 'inc/comments_panel.html' %}
+        {% include 'inc/panels/custom_fields.html' %}
+        {% include 'inc/panels/tags.html' %}
+        {% include 'inc/panels/comments.html' %}
         {% plugin_right_page object %}
     </div>
 </div>
-<div class="row">
-    <div class="col col-md-12">
-        <div class="card">
-            <h5 class="card-header">
-                Circuits
-            </h5>
-            <div class="card-body">
-                {% include 'inc/table.html' with table=circuits_table %}
-            </div>
-        </div>
+<div class="row mb-3">
+  <div class="col col-md-12">
+    <div class="card">
+      <h5 class="card-header">Circuits</h5>
+      <div class="card-body table-responsive">
+        {% render_table circuits_table 'inc/table.html' %}
         {% include 'inc/paginator.html' with paginator=circuits_table.paginator page=circuits_table.page %}
+      </div>
     </div>
-</div>
-<div class="row">
-    <div class="col col-md-12">
-        {% plugin_full_width_page object %}
-    </div>
+    {% plugin_full_width_page object %}
+  </div>
 </div>
 {% endblock %}

@@ -1,20 +1,16 @@
 import datetime
-import json
-import re
+import decimal
 from typing import Dict, Any
 
-import yaml
 from django import template
 from django.conf import settings
 from django.template.defaultfilters import date
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
-from django.utils.html import strip_tags
 from django.utils.safestring import mark_safe
-from markdown import markdown
 
 from utilities.forms import get_selected_values, TableConfigForm
-from utilities.utils import foreground_color
+from utilities.utils import get_viewname
 
 register = template.Library()
 
@@ -23,67 +19,13 @@ register = template.Library()
 # Filters
 #
 
-@register.filter()
-def placeholder(value):
-    """
-    Render a muted placeholder if value equates to False.
-    """
-    if value:
-        return value
-    placeholder = '<span class="text-muted">&mdash;</span>'
-    return mark_safe(placeholder)
-
-
-@register.filter(is_safe=True)
-def render_markdown(value):
-    """
-    Render text as Markdown
-    """
-    # Strip HTML tags
-    value = strip_tags(value)
-
-    # Sanitize Markdown links
-    schemes = '|'.join(settings.ALLOWED_URL_SCHEMES)
-    pattern = fr'\[(.+)\]\((?!({schemes})).*:(.+)\)'
-    value = re.sub(pattern, '[\\1](\\3)', value, flags=re.IGNORECASE)
-
-    # Render Markdown
-    html = markdown(value, extensions=['fenced_code', 'tables'])
-
-    return mark_safe(html)
-
-
-@register.filter()
-def render_json(value):
-    """
-    Render a dictionary as formatted JSON.
-    """
-    return json.dumps(value, ensure_ascii=False, indent=4, sort_keys=True)
-
-
-@register.filter()
-def render_yaml(value):
-    """
-    Render a dictionary as formatted YAML.
-    """
-    return yaml.dump(json.loads(json.dumps(value)))
-
-
-@register.filter()
-def meta(obj, attr):
-    """
-    Return the specified Meta attribute of a model. This is needed because Django does not permit templates
-    to access attributes which begin with an underscore (e.g. _meta).
-    """
-    return getattr(obj._meta, attr, '')
-
 
 @register.filter()
 def viewname(model, action):
     """
     Return the view name for the given model and action. Does not perform any validation.
     """
-    return f'{model._meta.app_label}:{model._meta.model_name}_{action}'
+    return get_viewname(model, action)
 
 
 @register.filter()
@@ -91,22 +33,14 @@ def validated_viewname(model, action):
     """
     Return the view name for the given model and action if valid, or None if invalid.
     """
-    viewname = f'{model._meta.app_label}:{model._meta.model_name}_{action}'
+    viewname = get_viewname(model, action)
+
+    # Validate the view name
     try:
-        # Validate and return the view name. We don't return the actual URL yet because many of the templates
-        # are written to pass a name to {% url %}.
         reverse(viewname)
         return viewname
     except NoReverseMatch:
         return None
-
-
-@register.filter()
-def bettertitle(value):
-    """
-    Alternative to the builtin title(); uppercases words without replacing letters that are already uppercase.
-    """
-    return ' '.join([w[0].upper() + w[1:] for w in value.split()])
 
 
 @register.filter()
@@ -147,11 +81,16 @@ def humanize_megabytes(mb):
 
 
 @register.filter()
-def tzoffset(value):
+def simplify_decimal(value):
     """
-    Returns the hour offset of a given time zone using the current time.
+    Return the simplest expression of a decimal value. Examples:
+      1.00 => '1'
+      1.20 => '1.2'
+      1.23 => '1.23'
     """
-    return datetime.datetime.now(value).strftime('%z')
+    if type(value) is not decimal.Decimal:
+        return value
+    return str(value).rstrip('0').rstrip('.')
 
 
 @register.filter(expects_localtime=True)
@@ -170,9 +109,7 @@ def annotated_date(date_value):
         long_ts = date(date_value, 'DATETIME_FORMAT')
         short_ts = date(date_value, 'SHORT_DATETIME_FORMAT')
 
-    span = f'<span title="{long_ts}">{short_ts}</span>'
-
-    return mark_safe(span)
+    return mark_safe(f'<span title="{long_ts}">{short_ts}</span>')
 
 
 @register.simple_tag
@@ -182,17 +119,6 @@ def annotated_now():
     """
     tzinfo = timezone.get_current_timezone() if settings.USE_TZ else None
     return annotated_date(datetime.datetime.now(tz=tzinfo))
-
-
-@register.filter()
-def fgcolor(value):
-    """
-    Return black (#000000) or white (#ffffff) given an arbitrary background color in RRGGBB format.
-    """
-    value = value.lower().strip('#')
-    if not re.match('^[0-9a-f]{6}$', value):
-        return ''
-    return '#{}'.format(foreground_color(value))
 
 
 @register.filter()
@@ -229,14 +155,6 @@ def has_perms(user, permissions_list):
     Return True if the user has *all* permissions in the list.
     """
     return user.has_perms(permissions_list)
-
-
-@register.filter()
-def split(string, sep=','):
-    """
-    Split a string by the given value (default: comma)
-    """
-    return string.split(sep)
 
 
 @register.filter()
@@ -339,12 +257,14 @@ def querystring(request, **kwargs):
         return ''
 
 
-@register.inclusion_tag('utilities/templatetags/utilization_graph.html')
+@register.inclusion_tag('helpers/utilization_graph.html')
 def utilization_graph(utilization, warning_threshold=75, danger_threshold=90):
     """
     Display a horizontal bar graph indicating a percentage of utilization.
     """
-    if danger_threshold and utilization >= danger_threshold:
+    if utilization == 100:
+        bar_class = 'bg-secondary'
+    elif danger_threshold and utilization >= danger_threshold:
         bar_class = 'bg-danger'
     elif warning_threshold and utilization >= warning_threshold:
         bar_class = 'bg-warning'
@@ -358,30 +278,7 @@ def utilization_graph(utilization, warning_threshold=75, danger_threshold=90):
     }
 
 
-@register.inclusion_tag('utilities/templatetags/tag.html')
-def tag(tag, url_name=None):
-    """
-    Display a tag, optionally linked to a filtered list of objects.
-    """
-    return {
-        'tag': tag,
-        'url_name': url_name,
-    }
-
-
-@register.inclusion_tag('utilities/templatetags/badge.html')
-def badge(value, bg_class='secondary', show_empty=False):
-    """
-    Display the specified number as a badge.
-    """
-    return {
-        'value': value,
-        'bg_class': bg_class,
-        'show_empty': show_empty,
-    }
-
-
-@register.inclusion_tag('utilities/templatetags/table_config_form.html')
+@register.inclusion_tag('helpers/table_config_form.html')
 def table_config_form(table, table_name=None):
     return {
         'table_name': table_name or table.__class__.__name__,
@@ -389,7 +286,7 @@ def table_config_form(table, table_name=None):
     }
 
 
-@register.inclusion_tag('utilities/templatetags/applied_filters.html')
+@register.inclusion_tag('helpers/applied_filters.html')
 def applied_filters(form, query_params):
     """
     Display the active filters for a given filter form.

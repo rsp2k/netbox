@@ -9,12 +9,13 @@ from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
+from netaddr import IPNetwork
 
-from netbox.models import BigIDModel
+from ipam.fields import IPNetworkField
+from netbox.config import get_config
 from utilities.querysets import RestrictedQuerySet
 from utilities.utils import flatten_dict
 from .constants import *
-
 
 __all__ = (
     'ObjectPermission',
@@ -79,13 +80,25 @@ class UserConfig(models.Model):
         keys = path.split('.')
 
         # Iterate down the hierarchy, returning the default value if any invalid key is encountered
-        for key in keys:
-            if type(d) is dict and key in d:
-                d = d.get(key)
-            else:
-                return default
+        try:
+            for key in keys:
+                d = d[key]
+            return d
+        except (TypeError, KeyError):
+            pass
 
-        return d
+        # If the key is not found in the user's config, check for an application-wide default
+        config = get_config()
+        d = config.DEFAULT_USER_PREFERENCES
+        try:
+            for key in keys:
+                d = d[key]
+            return d
+        except (TypeError, KeyError):
+            pass
+
+        # Finally, return the specified default value (if any)
+        return default
 
     def all(self):
         """
@@ -161,19 +174,20 @@ class UserConfig(models.Model):
 
 
 @receiver(post_save, sender=User)
-def create_userconfig(instance, created, **kwargs):
+def create_userconfig(instance, created, raw=False, **kwargs):
     """
-    Automatically create a new UserConfig when a new User is created.
+    Automatically create a new UserConfig when a new User is created. Skip this if importing a user from a fixture.
     """
-    if created:
-        UserConfig(user=instance).save()
+    if created and not raw:
+        config = get_config()
+        UserConfig(user=instance, data=config.DEFAULT_USER_PREFERENCES).save()
 
 
 #
 # REST API
 #
 
-class Token(BigIDModel):
+class Token(models.Model):
     """
     An API token used for user authentication. This extends the stock model to allow each user to have multiple tokens.
     It also supports setting an expiration time and toggling write ability.
@@ -190,6 +204,10 @@ class Token(BigIDModel):
         blank=True,
         null=True
     )
+    last_used = models.DateTimeField(
+        blank=True,
+        null=True
+    )
     key = models.CharField(
         max_length=40,
         unique=True,
@@ -202,6 +220,14 @@ class Token(BigIDModel):
     description = models.CharField(
         max_length=200,
         blank=True
+    )
+    allowed_ips = ArrayField(
+        base_field=IPNetworkField(),
+        blank=True,
+        null=True,
+        verbose_name='Allowed IPs',
+        help_text='Allowed IPv4/IPv6 networks from where the token can be used. Leave blank for no restrictions. '
+                  'Ex: "10.1.1.0/24, 192.168.10.16/32, 2001:DB8:1::/64"',
     )
 
     class Meta:
@@ -227,12 +253,25 @@ class Token(BigIDModel):
             return False
         return True
 
+    def validate_client_ip(self, client_ip):
+        """
+        Validate the API client IP address against the source IP restrictions (if any) set on the token.
+        """
+        if not self.allowed_ips:
+            return True
+
+        for ip_network in self.allowed_ips:
+            if client_ip in IPNetwork(ip_network):
+                return True
+
+        return False
+
 
 #
 # Permissions
 #
 
-class ObjectPermission(BigIDModel):
+class ObjectPermission(models.Model):
     """
     A mapping of view, add, change, and/or delete permission for users and/or groups to an arbitrary set of objects
     identified by ORM query parameters.

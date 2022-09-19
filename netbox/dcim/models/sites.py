@@ -7,12 +7,8 @@ from timezone_field import TimeZoneField
 
 from dcim.choices import *
 from dcim.constants import *
-from django.core.exceptions import ValidationError
-from dcim.fields import ASNField
-from extras.utils import extras_features
-from netbox.models import NestedGroupModel, PrimaryModel
+from netbox.models import NestedGroupModel, NetBoxModel
 from utilities.fields import NaturalOrderingField
-from utilities.querysets import RestrictedQuerySet
 
 __all__ = (
     'Location',
@@ -26,7 +22,6 @@ __all__ = (
 # Regions
 #
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'webhooks')
 class Region(NestedGroupModel):
     """
     A region represents a geographic collection of sites. For example, you might create regions representing countries,
@@ -42,23 +37,62 @@ class Region(NestedGroupModel):
         db_index=True
     )
     name = models.CharField(
-        max_length=100,
-        unique=True
+        max_length=100
     )
     slug = models.SlugField(
-        max_length=100,
-        unique=True
+        max_length=100
     )
     description = models.CharField(
         max_length=200,
         blank=True
     )
+
+    # Generic relations
     vlan_groups = GenericRelation(
         to='ipam.VLANGroup',
         content_type_field='scope_type',
         object_id_field='scope_id',
         related_query_name='region'
     )
+    contacts = GenericRelation(
+        to='tenancy.ContactAssignment'
+    )
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=('parent', 'name'),
+                name='dcim_region_parent_name'
+            ),
+            models.UniqueConstraint(
+                fields=('name',),
+                name='dcim_region_name',
+                condition=Q(parent=None)
+            ),
+            models.UniqueConstraint(
+                fields=('parent', 'slug'),
+                name='dcim_region_parent_slug'
+            ),
+            models.UniqueConstraint(
+                fields=('slug',),
+                name='dcim_region_slug',
+                condition=Q(parent=None)
+            ),
+        )
+
+    def validate_unique(self, exclude=None):
+        if self.parent is None:
+            regions = Region.objects.exclude(pk=self.pk)
+            if regions.filter(name=self.name, parent__isnull=True).exists():
+                raise ValidationError({
+                    'name': 'A region with this name already exists.'
+                })
+            if regions.filter(slug=self.slug, parent__isnull=True).exists():
+                raise ValidationError({
+                    'name': 'A region with this slug already exists.'
+                })
+
+        super().validate_unique(exclude=exclude)
 
     def get_absolute_url(self):
         return reverse('dcim:region', args=[self.pk])
@@ -74,7 +108,6 @@ class Region(NestedGroupModel):
 # Site groups
 #
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'webhooks')
 class SiteGroup(NestedGroupModel):
     """
     A site group is an arbitrary grouping of sites. For example, you might have corporate sites and customer sites; and
@@ -90,23 +123,62 @@ class SiteGroup(NestedGroupModel):
         db_index=True
     )
     name = models.CharField(
-        max_length=100,
-        unique=True
+        max_length=100
     )
     slug = models.SlugField(
-        max_length=100,
-        unique=True
+        max_length=100
     )
     description = models.CharField(
         max_length=200,
         blank=True
     )
+
+    # Generic relations
     vlan_groups = GenericRelation(
         to='ipam.VLANGroup',
         content_type_field='scope_type',
         object_id_field='scope_id',
         related_query_name='site_group'
     )
+    contacts = GenericRelation(
+        to='tenancy.ContactAssignment'
+    )
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=('parent', 'name'),
+                name='dcim_sitegroup_parent_name'
+            ),
+            models.UniqueConstraint(
+                fields=('name',),
+                name='dcim_sitegroup_name',
+                condition=Q(parent=None)
+            ),
+            models.UniqueConstraint(
+                fields=('parent', 'slug'),
+                name='dcim_sitegroup_parent_slug'
+            ),
+            models.UniqueConstraint(
+                fields=('slug',),
+                name='dcim_sitegroup_slug',
+                condition=Q(parent=None)
+            ),
+        )
+
+    def validate_unique(self, exclude=None):
+        if self.parent is None:
+            site_groups = SiteGroup.objects.exclude(pk=self.pk)
+            if site_groups.filter(name=self.name, parent__isnull=True).exists():
+                raise ValidationError({
+                    'name': 'A site group with this name already exists.'
+                })
+            if site_groups.filter(slug=self.slug, parent__isnull=True).exists():
+                raise ValidationError({
+                    'name': 'A site group with this slug already exists.'
+                })
+
+        super().validate_unique(exclude=exclude)
 
     def get_absolute_url(self):
         return reverse('dcim:sitegroup', args=[self.pk])
@@ -122,8 +194,7 @@ class SiteGroup(NestedGroupModel):
 # Sites
 #
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'tags', 'webhooks')
-class Site(PrimaryModel):
+class Site(NetBoxModel):
     """
     A Site represents a geographic location within a network; typically a building or campus. The optional facility
     field can be used to include an external designation, such as a data center name (e.g. Equinix SV6).
@@ -172,11 +243,10 @@ class Site(PrimaryModel):
         blank=True,
         help_text='Local facility ID or description'
     )
-    asn = ASNField(
-        blank=True,
-        null=True,
-        verbose_name='ASN',
-        help_text='32-bit autonomous system number'
+    asns = models.ManyToManyField(
+        to='ipam.ASN',
+        related_name='sites',
+        blank=True
     )
     time_zone = TimeZoneField(
         blank=True
@@ -207,37 +277,28 @@ class Site(PrimaryModel):
         null=True,
         help_text='GPS coordinate (longitude)'
     )
-    contact_name = models.CharField(
-        max_length=50,
-        blank=True
-    )
-    contact_phone = models.CharField(
-        max_length=20,
-        blank=True
-    )
-    contact_email = models.EmailField(
-        blank=True,
-        verbose_name='Contact E-mail'
-    )
     comments = models.TextField(
         blank=True
     )
+
+    # Generic relations
     vlan_groups = GenericRelation(
         to='ipam.VLANGroup',
         content_type_field='scope_type',
         object_id_field='scope_id',
         related_query_name='site'
     )
+    contacts = GenericRelation(
+        to='tenancy.ContactAssignment'
+    )
     images = GenericRelation(
         to='extras.ImageAttachment'
     )
 
-    objects = RestrictedQuerySet.as_manager()
-
-    clone_fields = [
-        'status', 'region', 'group', 'tenant', 'facility', 'asn', 'time_zone', 'description', 'physical_address',
-        'shipping_address', 'latitude', 'longitude', 'contact_name', 'contact_phone', 'contact_email',
-    ]
+    clone_fields = (
+        'status', 'region', 'group', 'tenant', 'facility', 'time_zone', 'physical_address', 'shipping_address',
+        'latitude', 'longitude', 'description',
+    )
 
     class Meta:
         ordering = ('_name',)
@@ -248,15 +309,14 @@ class Site(PrimaryModel):
     def get_absolute_url(self):
         return reverse('dcim:site', args=[self.pk])
 
-    def get_status_class(self):
-        return SiteStatusChoices.CSS_CLASSES.get(self.status)
+    def get_status_color(self):
+        return SiteStatusChoices.colors.get(self.status)
 
 
 #
 # Locations
 #
 
-@extras_features('custom_fields', 'custom_links', 'export_templates', 'webhooks')
 class Location(NestedGroupModel):
     """
     A Location represents a subgroup of Racks and/or Devices within a Site. A Location may represent a building within a
@@ -281,31 +341,85 @@ class Location(NestedGroupModel):
         null=True,
         db_index=True
     )
+    status = models.CharField(
+        max_length=50,
+        choices=LocationStatusChoices,
+        default=LocationStatusChoices.STATUS_ACTIVE
+    )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='locations',
+        blank=True,
+        null=True
+    )
     description = models.CharField(
         max_length=200,
         blank=True
     )
+
+    # Generic relations
     vlan_groups = GenericRelation(
         to='ipam.VLANGroup',
         content_type_field='scope_type',
         object_id_field='scope_id',
         related_query_name='location'
     )
+    contacts = GenericRelation(
+        to='tenancy.ContactAssignment'
+    )
     images = GenericRelation(
         to='extras.ImageAttachment'
     )
 
-    clone_fields = ['site', 'parent', 'description']
+    clone_fields = ('site', 'parent', 'status', 'tenant', 'description')
 
     class Meta:
         ordering = ['site', 'name']
-        unique_together = [
-            ['site', 'name'],
-            ['site', 'slug'],
-        ]
+        constraints = (
+            models.UniqueConstraint(
+                fields=('site', 'parent', 'name'),
+                name='dcim_location_parent_name'
+            ),
+            models.UniqueConstraint(
+                fields=('site', 'name'),
+                name='dcim_location_name',
+                condition=Q(parent=None)
+            ),
+            models.UniqueConstraint(
+                fields=('site', 'parent', 'slug'),
+                name='dcim_location_parent_slug'
+            ),
+            models.UniqueConstraint(
+                fields=('site', 'slug'),
+                name='dcim_location_slug',
+                condition=Q(parent=None)
+            ),
+        )
+
+    def validate_unique(self, exclude=None):
+        if self.parent is None:
+            locations = Location.objects.exclude(pk=self.pk)
+            if locations.filter(name=self.name, site=self.site, parent__isnull=True).exists():
+                raise ValidationError({
+                    "name": f"A location with this name in site {self.site} already exists."
+                })
+            if locations.filter(slug=self.slug, site=self.site, parent__isnull=True).exists():
+                raise ValidationError({
+                    "name": f"A location with this slug in site {self.site} already exists."
+                })
+
+        super().validate_unique(exclude=exclude)
+
+    @classmethod
+    def get_prerequisite_models(cls):
+        return [Site, ]
 
     def get_absolute_url(self):
         return reverse('dcim:location', args=[self.pk])
+
+    def get_status_color(self):
+        return LocationStatusChoices.colors.get(self.status)
 
     def clean(self):
         super().clean()

@@ -24,39 +24,27 @@
                 <table class="table table-hover attr-table">
                     <tr>
                         <th scope="row">Power Panel</th>
-                        <td>
-                            <a href="{{ object.power_panel.get_absolute_url }}">{{ object.power_panel }}</a>
-                        </td>
+                        <td>{{ object.power_panel|linkify }}</td>
                     </tr>
                     <tr>
                         <th scope="row">Rack</th>
-                        <td>
-                            {% if object.rack %}
-                                <a href="{{ object.rack.get_absolute_url }}">{{ object.rack }}</a>
-                            {% else %}
-                                <span class="text-muted">None</span>
-                            {% endif %}
-                        </td>
+                        <td>{{ object.rack|linkify|placeholder }}</td>
                     </tr>
                     <tr>
                         <th scope="row">Type</th>
-                        <td>
-                            <span class="badge bg-{{ object.get_type_class }}">{{ object.get_type_display }}</span>
-                        </td>
+                        <td>{% badge object.get_type_display bg_color=object.get_type_color %}</td>
                     </tr>
                     <tr>
                         <th scope="row">Status</th>
-                        <td>
-                            <span class="badge bg-{{ object.get_status_class }}">{{ object.get_status_display }}</span>
-                        </td>
+                        <td>{% badge object.get_status_display bg_color=object.get_status_color %}</td>
                     </tr>
                     <tr>
                         <th scope="row">Connected Device</th>
                         <td>
                             {% if object.connected_endpoint %}
-                                <a href="{{ object.connected_endpoint.device.get_absolute_url }}">{{ object.connected_endpoint.device }}</a> ({{ object.connected_endpoint }})
+                                {{ object.connected_endpoint.device|linkify }} ({{ object.connected_endpoint }})
                             {% else %}
-                                <span class="text-muted">None</span>
+                                {{ ''|placeholder }}
                             {% endif %}
                         </td>
                     </tr>
@@ -107,8 +95,8 @@
                 </table>
             </div>
         </div>
-        {% include 'inc/custom_fields_panel.html' %}
-        {% include 'extras/inc/tags_panel.html' with tags=object.tags.all url='dcim:powerfeed_list' %}
+        {% include 'inc/panels/custom_fields.html' %}
+        {% include 'inc/panels/tags.html' %}
         {% plugin_left_page object %}
     </div>
     <div class="col col-md-6">
@@ -126,7 +114,7 @@
                     <tr>
                         <th scope="row">Cable</th>
                         <td>
-                            <a href="{{ object.cable.get_absolute_url }}">{{ object.cable }}</a>
+                            {{ object.cable|linkify }}
                             <a href="{% url 'dcim:powerfeed_trace' pk=object.pk %}" class="btn btn-primary btn-sm lh-1" title="Trace">
                                 <i class="mdi mdi-transit-connection-variant" aria-hidden="true"></i>
                             </a>
@@ -135,15 +123,11 @@
                     {% if object.connected_endpoint %}
                         <tr>
                             <th scope="row">Device</th>
-                            <td>
-                                <a href="{{ object.connected_endpoint.device.get_absolute_url }}">{{ object.connected_endpoint.device }}</a>
-                            </td>
+                            <td>{{ object.connected_endpoint.device|linkify }}</td>
                         </tr>
                         <tr>
                             <th scope="row">Name</th>
-                            <td>
-                                <a href="{{ object.connected_endpoint.get_absolute_url }}">{{ object.connected_endpoint.name }}</a>
-                            </td>
+                            <td>{{ object.connected_endpoint|linkify:"name" }}</td>
                         </tr>
                         <tr>
                             <th scope="row">Type</th>
@@ -174,15 +158,14 @@
             {% if not object.mark_connected and not object.cable %}
             <div class="card-footer">
             {% if perms.dcim.add_cable %}
-                <a href="{% url 'dcim:powerfeed_connect' termination_a_id=object.pk termination_b_type='power-port' %}?return_url={{ object.get_absolute_url }}"
-                class="btn btn-primary btn-sm float-end">
+                <a href="{% url 'dcim:cable_add' %}?a_terminations_type=dcim.powerfeed&a_terminations={{ object.pk }}&b_terminations_type=dcim.powerport&termination_b_site={{ object.device.site.pk }}&termination_b_rack={{ object.device.rack.pk }}&return_url={{ object.get_absolute_url }}" class="btn btn-primary btn-sm float-end">
                     <i class="mdi mdi-ethernet-cable" aria-hidden="true"></i> Connect
                 </a>
                     {% endif %}
             </div>
             {% endif %}
         </div>
-        {% include 'inc/comments_panel.html' %}
+        {% include 'inc/panels/comments.html' %}
         {% plugin_right_page object %}
     </div>
 </div>

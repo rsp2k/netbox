@@ -2,16 +2,14 @@ import django_tables2 as tables
 from django.utils.safestring import mark_safe
 from django_tables2.utils import Accessor
 
-from tenancy.tables import TenantColumn
-from utilities.tables import (
-    BaseTable, BooleanColumn, ButtonsColumn, ChoiceFieldColumn, LinkedCountColumn, TagColumn,
-    ToggleColumn, UtilizationColumn,
-)
 from ipam.models import *
+from netbox.tables import NetBoxTable, columns
+from tenancy.tables import TenancyColumnsMixin, TenantColumn
 
 __all__ = (
     'AggregateTable',
-    'InterfaceIPAddressTable',
+    'ASNTable',
+    'AssignedIPAddressesTable',
     'IPAddressAssignTable',
     'IPAddressTable',
     'IPRangeTable',
@@ -23,6 +21,14 @@ __all__ = (
 AVAILABLE_LABEL = mark_safe('<span class="badge bg-success">Available</span>')
 
 PREFIX_LINK = """
+{% if record.pk %}
+  <a href="{{ record.get_absolute_url }}">{{ record.prefix }}</a>
+{% else %}
+  <a href="{% url 'ipam:prefix_add' %}?prefix={{ record }}{% if object.vrf %}&vrf={{ object.vrf.pk }}{% endif %}{% if object.site %}&site={{ object.site.pk }}{% endif %}{% if object.tenant %}&tenant_group={{ object.tenant.group.pk }}&tenant={{ object.tenant.pk }}{% endif %}">{{ record.prefix }}</a>
+{% endif %}
+"""
+
+PREFIX_LINK_WITH_DEPTH = """
 {% load helpers %}
 {% if record.depth %}
     <div class="record-depth">
@@ -31,17 +37,7 @@ PREFIX_LINK = """
         {% endfor %}
     </div>
 {% endif %}
-<a href="{% if record.pk %}{% url 'ipam:prefix' pk=record.pk %}{% else %}{% url 'ipam:prefix_add' %}?prefix={{ record }}{% if object.vrf %}&vrf={{ object.vrf.pk }}{% endif %}{% if object.site %}&site={{ object.site.pk }}{% endif %}{% if object.tenant %}&tenant_group={{ object.tenant.group.pk }}&tenant={{ object.tenant.pk }}{% endif %}{% endif %}">{{ record.prefix }}</a>
-"""
-
-PREFIXFLAT_LINK = """
-{% load helpers %}
-{% if record.pk %}
-    <a href="{% url 'ipam:prefix' pk=record.pk %}">{{ record.prefix }}</a>
-{% else %}
-    {{ record.prefix }}
-{% endif %}
-"""
+""" + PREFIX_LINK
 
 IPADDRESS_LINK = """
 {% if record.pk %}
@@ -58,7 +54,7 @@ IPADDRESS_ASSIGN_LINK = """
 """
 
 VRF_LINK = """
-{% if record.vrf %}
+{% if value %}
     <a href="{{ record.vrf.get_absolute_url }}">{{ record.vrf }}</a>
 {% elif object.vrf %}
     <a href="{{ object.vrf.get_absolute_url }}">{{ object.vrf }}</a>
@@ -72,38 +68,80 @@ VRF_LINK = """
 # RIRs
 #
 
-class RIRTable(BaseTable):
-    pk = ToggleColumn()
+class RIRTable(NetBoxTable):
     name = tables.Column(
         linkify=True
     )
-    is_private = BooleanColumn(
+    is_private = columns.BooleanColumn(
         verbose_name='Private'
     )
-    aggregate_count = LinkedCountColumn(
+    aggregate_count = columns.LinkedCountColumn(
         viewname='ipam:aggregate_list',
         url_params={'rir_id': 'pk'},
         verbose_name='Aggregates'
     )
-    actions = ButtonsColumn(RIR)
+    tags = columns.TagColumn(
+        url_name='ipam:rir_list'
+    )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = RIR
-        fields = ('pk', 'name', 'slug', 'is_private', 'aggregate_count', 'description', 'actions')
-        default_columns = ('pk', 'name', 'is_private', 'aggregate_count', 'description', 'actions')
+        fields = (
+            'pk', 'id', 'name', 'slug', 'is_private', 'aggregate_count', 'description', 'tags', 'created',
+            'last_updated', 'actions',
+        )
+        default_columns = ('pk', 'name', 'is_private', 'aggregate_count', 'description')
+
+
+#
+# ASNs
+#
+
+class ASNTable(TenancyColumnsMixin, NetBoxTable):
+    asn = tables.Column(
+        linkify=True
+    )
+    asn_asdot = tables.Column(
+        accessor=tables.A('asn_asdot'),
+        linkify=True,
+        verbose_name='ASDOT'
+    )
+    site_count = columns.LinkedCountColumn(
+        viewname='dcim:site_list',
+        url_params={'asn_id': 'pk'},
+        verbose_name='Site Count'
+    )
+    provider_count = columns.LinkedCountColumn(
+        viewname='circuits:provider_list',
+        url_params={'asn_id': 'pk'},
+        verbose_name='Provider Count'
+    )
+    sites = columns.ManyToManyColumn(
+        linkify_item=True,
+        verbose_name='Sites'
+    )
+    tags = columns.TagColumn(
+        url_name='ipam:asn_list'
+    )
+
+    class Meta(NetBoxTable.Meta):
+        model = ASN
+        fields = (
+            'pk', 'asn', 'asn_asdot', 'rir', 'site_count', 'provider_count', 'tenant', 'tenant_group', 'description', 'sites', 'tags',
+            'created', 'last_updated', 'actions',
+        )
+        default_columns = ('pk', 'asn', 'rir', 'site_count', 'provider_count', 'sites', 'description', 'tenant')
 
 
 #
 # Aggregates
 #
 
-class AggregateTable(BaseTable):
-    pk = ToggleColumn()
+class AggregateTable(TenancyColumnsMixin, NetBoxTable):
     prefix = tables.Column(
         linkify=True,
         verbose_name='Aggregate'
     )
-    tenant = TenantColumn()
     date_added = tables.DateColumn(
         format="Y-m-d",
         verbose_name='Added'
@@ -111,17 +149,20 @@ class AggregateTable(BaseTable):
     child_count = tables.Column(
         verbose_name='Prefixes'
     )
-    utilization = UtilizationColumn(
+    utilization = columns.UtilizationColumn(
         accessor='get_utilization',
         orderable=False
     )
-    tags = TagColumn(
+    tags = columns.TagColumn(
         url_name='ipam:aggregate_list'
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = Aggregate
-        fields = ('pk', 'prefix', 'rir', 'tenant', 'child_count', 'utilization', 'date_added', 'description', 'tags')
+        fields = (
+            'pk', 'id', 'prefix', 'rir', 'tenant', 'tenant_group', 'child_count', 'utilization', 'date_added', 'description', 'tags',
+            'created', 'last_updated',
+        )
         default_columns = ('pk', 'prefix', 'rir', 'tenant', 'child_count', 'utilization', 'date_added', 'description')
 
 
@@ -129,34 +170,43 @@ class AggregateTable(BaseTable):
 # Roles
 #
 
-class RoleTable(BaseTable):
-    pk = ToggleColumn()
+class RoleTable(NetBoxTable):
     name = tables.Column(
         linkify=True
     )
-    prefix_count = LinkedCountColumn(
+    prefix_count = columns.LinkedCountColumn(
         viewname='ipam:prefix_list',
         url_params={'role_id': 'pk'},
         verbose_name='Prefixes'
     )
-    vlan_count = LinkedCountColumn(
+    iprange_count = columns.LinkedCountColumn(
+        viewname='ipam:iprange_list',
+        url_params={'role_id': 'pk'},
+        verbose_name='IP Ranges'
+    )
+    vlan_count = columns.LinkedCountColumn(
         viewname='ipam:vlan_list',
         url_params={'role_id': 'pk'},
         verbose_name='VLANs'
     )
-    actions = ButtonsColumn(Role)
+    tags = columns.TagColumn(
+        url_name='ipam:role_list'
+    )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = Role
-        fields = ('pk', 'name', 'slug', 'prefix_count', 'vlan_count', 'description', 'weight', 'actions')
-        default_columns = ('pk', 'name', 'prefix_count', 'vlan_count', 'description', 'actions')
+        fields = (
+            'pk', 'id', 'name', 'slug', 'prefix_count', 'iprange_count', 'vlan_count', 'description', 'weight', 'tags',
+            'created', 'last_updated', 'actions',
+        )
+        default_columns = ('pk', 'name', 'prefix_count', 'iprange_count', 'vlan_count', 'description')
 
 
 #
 # Prefixes
 #
 
-class PrefixUtilizationColumn(UtilizationColumn):
+class PrefixUtilizationColumn(columns.UtilizationColumn):
     """
     Extend UtilizationColumn to allow disabling the warning & danger thresholds for prefixes
     marked as fully utilized.
@@ -171,22 +221,23 @@ class PrefixUtilizationColumn(UtilizationColumn):
     """
 
 
-class PrefixTable(BaseTable):
-    pk = ToggleColumn()
-    prefix = tables.TemplateColumn(
-        template_code=PREFIX_LINK,
+class PrefixTable(TenancyColumnsMixin, NetBoxTable):
+    prefix = columns.TemplateColumn(
+        template_code=PREFIX_LINK_WITH_DEPTH,
+        export_raw=True,
         attrs={'td': {'class': 'text-nowrap'}}
     )
-    prefix_flat = tables.TemplateColumn(
-        template_code=PREFIXFLAT_LINK,
-        attrs={'td': {'class': 'text-nowrap'}},
-        verbose_name='Prefix (Flat)',
+    prefix_flat = columns.TemplateColumn(
+        accessor=Accessor('prefix'),
+        template_code=PREFIX_LINK,
+        export_raw=True,
+        verbose_name='Prefix (Flat)'
     )
     depth = tables.Column(
         accessor=Accessor('_depth'),
         verbose_name='Depth'
     )
-    children = LinkedCountColumn(
+    children = columns.LinkedCountColumn(
         accessor=Accessor('_children'),
         viewname='ipam:prefix_list',
         url_params={
@@ -195,16 +246,20 @@ class PrefixTable(BaseTable):
         },
         verbose_name='Children'
     )
-    status = ChoiceFieldColumn(
+    status = columns.ChoiceFieldColumn(
         default=AVAILABLE_LABEL
     )
     vrf = tables.TemplateColumn(
         template_code=VRF_LINK,
         verbose_name='VRF'
     )
-    tenant = TenantColumn()
     site = tables.Column(
         linkify=True
+    )
+    vlan_group = tables.Column(
+        accessor='vlan__group',
+        linkify=True,
+        verbose_name='VLAN Group'
     )
     vlan = tables.Column(
         linkify=True,
@@ -213,25 +268,25 @@ class PrefixTable(BaseTable):
     role = tables.Column(
         linkify=True
     )
-    is_pool = BooleanColumn(
+    is_pool = columns.BooleanColumn(
         verbose_name='Pool'
     )
-    mark_utilized = BooleanColumn(
+    mark_utilized = columns.BooleanColumn(
         verbose_name='Marked Utilized'
     )
     utilization = PrefixUtilizationColumn(
         accessor='get_utilization',
         orderable=False
     )
-    tags = TagColumn(
+    tags = columns.TagColumn(
         url_name='ipam:prefix_list'
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = Prefix
         fields = (
-            'pk', 'prefix', 'prefix_flat', 'status', 'children', 'vrf', 'utilization', 'tenant', 'site', 'vlan', 'role',
-            'is_pool', 'mark_utilized', 'description', 'tags',
+            'pk', 'id', 'prefix', 'prefix_flat', 'status', 'children', 'vrf', 'utilization', 'tenant', 'tenant_group', 'site',
+            'vlan_group', 'vlan', 'role', 'is_pool', 'mark_utilized', 'description', 'tags', 'created', 'last_updated',
         )
         default_columns = (
             'pk', 'prefix', 'status', 'children', 'vrf', 'utilization', 'tenant', 'site', 'vlan', 'role', 'description',
@@ -244,8 +299,7 @@ class PrefixTable(BaseTable):
 #
 # IP ranges
 #
-class IPRangeTable(BaseTable):
-    pk = ToggleColumn()
+class IPRangeTable(TenancyColumnsMixin, NetBoxTable):
     start_address = tables.Column(
         linkify=True
     )
@@ -253,23 +307,25 @@ class IPRangeTable(BaseTable):
         template_code=VRF_LINK,
         verbose_name='VRF'
     )
-    status = ChoiceFieldColumn(
+    status = columns.ChoiceFieldColumn(
         default=AVAILABLE_LABEL
     )
     role = tables.Column(
         linkify=True
     )
-    tenant = TenantColumn()
-    utilization = UtilizationColumn(
+    utilization = columns.UtilizationColumn(
         accessor='utilization',
         orderable=False
     )
+    tags = columns.TagColumn(
+        url_name='ipam:iprange_list'
+    )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = IPRange
         fields = (
-            'pk', 'start_address', 'end_address', 'size', 'vrf', 'status', 'role', 'tenant', 'description',
-            'utilization',
+            'pk', 'id', 'start_address', 'end_address', 'size', 'vrf', 'status', 'role', 'tenant', 'tenant_group', 'description',
+            'utilization', 'tags', 'created', 'last_updated',
         )
         default_columns = (
             'pk', 'start_address', 'end_address', 'size', 'vrf', 'status', 'role', 'tenant', 'description',
@@ -283,8 +339,7 @@ class IPRangeTable(BaseTable):
 # IPAddresses
 #
 
-class IPAddressTable(BaseTable):
-    pk = ToggleColumn()
+class IPAddressTable(TenancyColumnsMixin, NetBoxTable):
     address = tables.TemplateColumn(
         template_code=IPADDRESS_LINK,
         verbose_name='IP Address'
@@ -293,18 +348,17 @@ class IPAddressTable(BaseTable):
         template_code=VRF_LINK,
         verbose_name='VRF'
     )
-    status = ChoiceFieldColumn(
+    status = columns.ChoiceFieldColumn(
         default=AVAILABLE_LABEL
     )
-    role = ChoiceFieldColumn()
-    tenant = TenantColumn()
+    role = columns.ChoiceFieldColumn()
     assigned_object = tables.Column(
         linkify=True,
         orderable=False,
         verbose_name='Interface'
     )
     assigned_object_parent = tables.Column(
-        accessor='assigned_object.parent_object',
+        accessor='assigned_object__parent_object',
         linkify=True,
         orderable=False,
         verbose_name='Device/VM'
@@ -314,20 +368,25 @@ class IPAddressTable(BaseTable):
         orderable=False,
         verbose_name='NAT (Inside)'
     )
-    assigned = BooleanColumn(
-        accessor='assigned_object',
+    nat_outside = tables.ManyToManyColumn(
+        linkify_item=True,
+        orderable=False,
+        verbose_name='NAT (Outside)'
+    )
+    assigned = columns.BooleanColumn(
+        accessor='assigned_object_id',
         linkify=True,
         verbose_name='Assigned'
     )
-    tags = TagColumn(
+    tags = columns.TagColumn(
         url_name='ipam:ipaddress_list'
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = IPAddress
         fields = (
-            'pk', 'address', 'vrf', 'status', 'role', 'tenant', 'nat_inside', 'assigned', 'dns_name', 'description',
-            'tags',
+            'pk', 'id', 'address', 'vrf', 'status', 'role', 'tenant', 'tenant_group', 'nat_inside', 'nat_outside', 'assigned', 'dns_name', 'description',
+            'tags', 'created', 'last_updated',
         )
         default_columns = (
             'pk', 'address', 'vrf', 'status', 'role', 'tenant', 'assigned', 'dns_name', 'description',
@@ -337,25 +396,26 @@ class IPAddressTable(BaseTable):
         }
 
 
-class IPAddressAssignTable(BaseTable):
+class IPAddressAssignTable(NetBoxTable):
     address = tables.TemplateColumn(
         template_code=IPADDRESS_ASSIGN_LINK,
         verbose_name='IP Address'
     )
-    status = ChoiceFieldColumn()
+    status = columns.ChoiceFieldColumn()
     assigned_object = tables.Column(
         orderable=False
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = IPAddress
         fields = ('address', 'dns_name', 'vrf', 'status', 'role', 'tenant', 'assigned_object', 'description')
+        exclude = ('id', )
         orderable = False
 
 
-class InterfaceIPAddressTable(BaseTable):
+class AssignedIPAddressesTable(NetBoxTable):
     """
-    List IP addresses assigned to a specific Interface.
+    List IP addresses assigned to an object.
     """
     address = tables.Column(
         linkify=True,
@@ -365,12 +425,10 @@ class InterfaceIPAddressTable(BaseTable):
         template_code=VRF_LINK,
         verbose_name='VRF'
     )
-    status = ChoiceFieldColumn()
+    status = columns.ChoiceFieldColumn()
     tenant = TenantColumn()
-    actions = ButtonsColumn(
-        model=IPAddress
-    )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = IPAddress
         fields = ('address', 'vrf', 'status', 'role', 'tenant', 'description')
+        exclude = ('id', )

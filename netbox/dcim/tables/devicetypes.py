@@ -2,11 +2,10 @@ import django_tables2 as tables
 
 from dcim.models import (
     ConsolePortTemplate, ConsoleServerPortTemplate, DeviceBayTemplate, DeviceType, FrontPortTemplate, InterfaceTemplate,
-    Manufacturer, PowerOutletTemplate, PowerPortTemplate, RearPortTemplate,
+    InventoryItemTemplate, Manufacturer, ModuleBayTemplate, PowerOutletTemplate, PowerPortTemplate, RearPortTemplate,
 )
-from utilities.tables import (
-    BaseTable, BooleanColumn, ButtonsColumn, ColorColumn, LinkedCountColumn, MarkdownColumn, TagColumn, ToggleColumn,
-)
+from netbox.tables import NetBoxTable, columns
+from .template_code import MODULAR_COMPONENT_TEMPLATE_BUTTONS
 
 __all__ = (
     'ConsolePortTemplateTable',
@@ -15,7 +14,9 @@ __all__ = (
     'DeviceTypeTable',
     'FrontPortTemplateTable',
     'InterfaceTemplateTable',
+    'InventoryItemTemplateTable',
     'ManufacturerTable',
+    'ModuleBayTemplateTable',
     'PowerOutletTemplateTable',
     'PowerPortTemplateTable',
     'RearPortTemplateTable',
@@ -26,12 +27,13 @@ __all__ = (
 # Manufacturers
 #
 
-class ManufacturerTable(BaseTable):
-    pk = ToggleColumn()
+class ManufacturerTable(NetBoxTable):
     name = tables.Column(
         linkify=True
     )
-    devicetype_count = tables.Column(
+    devicetype_count = columns.LinkedCountColumn(
+        viewname='dcim:devicetype_list',
+        url_params={'manufacturer_id': 'pk'},
         verbose_name='Device Types'
     )
     inventoryitem_count = tables.Column(
@@ -41,12 +43,21 @@ class ManufacturerTable(BaseTable):
         verbose_name='Platforms'
     )
     slug = tables.Column()
-    actions = ButtonsColumn(Manufacturer)
+    contacts = columns.ManyToManyColumn(
+        linkify_item=True
+    )
+    tags = columns.TagColumn(
+        url_name='dcim:manufacturer_list'
+    )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = Manufacturer
         fields = (
-            'pk', 'name', 'devicetype_count', 'inventoryitem_count', 'platform_count', 'description', 'slug', 'actions',
+            'pk', 'id', 'name', 'devicetype_count', 'inventoryitem_count', 'platform_count', 'description', 'slug',
+            'contacts', 'actions', 'created', 'last_updated',
+        )
+        default_columns = (
+            'pk', 'name', 'devicetype_count', 'inventoryitem_count', 'platform_count', 'description', 'slug',
         )
 
 
@@ -54,30 +65,32 @@ class ManufacturerTable(BaseTable):
 # Device types
 #
 
-class DeviceTypeTable(BaseTable):
-    pk = ToggleColumn()
+class DeviceTypeTable(NetBoxTable):
     model = tables.Column(
         linkify=True,
         verbose_name='Device Type'
     )
-    is_full_depth = BooleanColumn(
+    manufacturer = tables.Column(
+        linkify=True
+    )
+    is_full_depth = columns.BooleanColumn(
         verbose_name='Full Depth'
     )
-    instance_count = LinkedCountColumn(
+    instance_count = columns.LinkedCountColumn(
         viewname='dcim:device_list',
         url_params={'device_type_id': 'pk'},
         verbose_name='Instances'
     )
-    comments = MarkdownColumn()
-    tags = TagColumn(
+    comments = columns.MarkdownColumn()
+    tags = columns.TagColumn(
         url_name='dcim:devicetype_list'
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(NetBoxTable.Meta):
         model = DeviceType
         fields = (
-            'pk', 'model', 'manufacturer', 'slug', 'part_number', 'u_height', 'is_full_depth', 'subdevice_role',
-            'comments', 'instance_count', 'tags',
+            'pk', 'id', 'model', 'manufacturer', 'slug', 'part_number', 'u_height', 'is_full_depth', 'subdevice_role',
+            'airflow', 'comments', 'instance_count', 'tags', 'created', 'last_updated',
         )
         default_columns = (
             'pk', 'model', 'manufacturer', 'part_number', 'u_height', 'is_full_depth', 'instance_count',
@@ -88,78 +101,78 @@ class DeviceTypeTable(BaseTable):
 # Device type components
 #
 
-class ComponentTemplateTable(BaseTable):
-    pk = ToggleColumn()
+class ComponentTemplateTable(NetBoxTable):
+    id = tables.Column(
+        verbose_name='ID'
+    )
     name = tables.Column(
         order_by=('_name',)
     )
 
+    class Meta(NetBoxTable.Meta):
+        exclude = ('id', )
+
 
 class ConsolePortTemplateTable(ComponentTemplateTable):
-    actions = ButtonsColumn(
-        model=ConsolePortTemplate,
-        buttons=('edit', 'delete'),
-        return_url_extra='%23tab_consoleports'
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete'),
+        extra_buttons=MODULAR_COMPONENT_TEMPLATE_BUTTONS
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(ComponentTemplateTable.Meta):
         model = ConsolePortTemplate
         fields = ('pk', 'name', 'label', 'type', 'description', 'actions')
         empty_text = "None"
 
 
 class ConsoleServerPortTemplateTable(ComponentTemplateTable):
-    actions = ButtonsColumn(
-        model=ConsoleServerPortTemplate,
-        buttons=('edit', 'delete'),
-        return_url_extra='%23tab_consoleserverports'
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete'),
+        extra_buttons=MODULAR_COMPONENT_TEMPLATE_BUTTONS
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(ComponentTemplateTable.Meta):
         model = ConsoleServerPortTemplate
         fields = ('pk', 'name', 'label', 'type', 'description', 'actions')
         empty_text = "None"
 
 
 class PowerPortTemplateTable(ComponentTemplateTable):
-    actions = ButtonsColumn(
-        model=PowerPortTemplate,
-        buttons=('edit', 'delete'),
-        return_url_extra='%23tab_powerports'
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete'),
+        extra_buttons=MODULAR_COMPONENT_TEMPLATE_BUTTONS
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(ComponentTemplateTable.Meta):
         model = PowerPortTemplate
         fields = ('pk', 'name', 'label', 'type', 'maximum_draw', 'allocated_draw', 'description', 'actions')
         empty_text = "None"
 
 
 class PowerOutletTemplateTable(ComponentTemplateTable):
-    actions = ButtonsColumn(
-        model=PowerOutletTemplate,
-        buttons=('edit', 'delete'),
-        return_url_extra='%23tab_poweroutlets'
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete'),
+        extra_buttons=MODULAR_COMPONENT_TEMPLATE_BUTTONS
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(ComponentTemplateTable.Meta):
         model = PowerOutletTemplate
         fields = ('pk', 'name', 'label', 'type', 'power_port', 'feed_leg', 'description', 'actions')
         empty_text = "None"
 
 
 class InterfaceTemplateTable(ComponentTemplateTable):
-    mgmt_only = BooleanColumn(
+    mgmt_only = columns.BooleanColumn(
         verbose_name='Management Only'
     )
-    actions = ButtonsColumn(
-        model=InterfaceTemplate,
-        buttons=('edit', 'delete'),
-        return_url_extra='%23tab_interfaces'
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete'),
+        extra_buttons=MODULAR_COMPONENT_TEMPLATE_BUTTONS
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(ComponentTemplateTable.Meta):
         model = InterfaceTemplate
-        fields = ('pk', 'name', 'label', 'mgmt_only', 'type', 'description', 'actions')
+        fields = ('pk', 'name', 'label', 'mgmt_only', 'type', 'description', 'poe_mode', 'poe_type', 'actions')
         empty_text = "None"
 
 
@@ -167,41 +180,70 @@ class FrontPortTemplateTable(ComponentTemplateTable):
     rear_port_position = tables.Column(
         verbose_name='Position'
     )
-    color = ColorColumn()
-    actions = ButtonsColumn(
-        model=FrontPortTemplate,
-        buttons=('edit', 'delete'),
-        return_url_extra='%23tab_frontports'
+    color = columns.ColorColumn()
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete'),
+        extra_buttons=MODULAR_COMPONENT_TEMPLATE_BUTTONS
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(ComponentTemplateTable.Meta):
         model = FrontPortTemplate
         fields = ('pk', 'name', 'label', 'type', 'color', 'rear_port', 'rear_port_position', 'description', 'actions')
         empty_text = "None"
 
 
 class RearPortTemplateTable(ComponentTemplateTable):
-    color = ColorColumn()
-    actions = ButtonsColumn(
-        model=RearPortTemplate,
-        buttons=('edit', 'delete'),
-        return_url_extra='%23tab_rearports'
+    color = columns.ColorColumn()
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete'),
+        extra_buttons=MODULAR_COMPONENT_TEMPLATE_BUTTONS
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(ComponentTemplateTable.Meta):
         model = RearPortTemplate
         fields = ('pk', 'name', 'label', 'type', 'color', 'positions', 'description', 'actions')
         empty_text = "None"
 
 
-class DeviceBayTemplateTable(ComponentTemplateTable):
-    actions = ButtonsColumn(
-        model=DeviceBayTemplate,
-        buttons=('edit', 'delete'),
-        return_url_extra='%23tab_devicebays'
+class ModuleBayTemplateTable(ComponentTemplateTable):
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete')
     )
 
-    class Meta(BaseTable.Meta):
+    class Meta(ComponentTemplateTable.Meta):
+        model = ModuleBayTemplate
+        fields = ('pk', 'name', 'label', 'position', 'description', 'actions')
+        empty_text = "None"
+
+
+class DeviceBayTemplateTable(ComponentTemplateTable):
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete')
+    )
+
+    class Meta(ComponentTemplateTable.Meta):
         model = DeviceBayTemplate
         fields = ('pk', 'name', 'label', 'description', 'actions')
+        empty_text = "None"
+
+
+class InventoryItemTemplateTable(ComponentTemplateTable):
+    actions = columns.ActionsColumn(
+        actions=('edit', 'delete')
+    )
+    role = tables.Column(
+        linkify=True
+    )
+    manufacturer = tables.Column(
+        linkify=True
+    )
+    component = tables.Column(
+        orderable=False
+    )
+
+    class Meta(ComponentTemplateTable.Meta):
+        model = InventoryItemTemplate
+        fields = (
+            'pk', 'name', 'label', 'parent', 'role', 'manufacturer', 'part_id', 'component', 'description', 'actions',
+        )
         empty_text = "None"

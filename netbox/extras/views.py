@@ -10,8 +10,8 @@ from rq import Worker
 
 from netbox.views import generic
 from utilities.forms import ConfirmationForm
-from utilities.tables import paginate_table
-from utilities.utils import copy_safe_request, count_related, shallow_compare_dict
+from utilities.htmx import is_htmx
+from utilities.utils import copy_safe_request, count_related, get_viewname, normalize_querydict, shallow_compare_dict
 from utilities.views import ContentTypePermissionRequiredMixin
 from . import filtersets, forms, tables
 from .choices import JobResultStatusChoices
@@ -37,7 +37,7 @@ class CustomFieldView(generic.ObjectView):
 
 class CustomFieldEditView(generic.ObjectEditView):
     queryset = CustomField.objects.all()
-    model_form = forms.CustomFieldForm
+    form = forms.CustomFieldForm
 
 
 class CustomFieldDeleteView(generic.ObjectDeleteView):
@@ -80,7 +80,7 @@ class CustomLinkView(generic.ObjectView):
 
 class CustomLinkEditView(generic.ObjectEditView):
     queryset = CustomLink.objects.all()
-    model_form = forms.CustomLinkForm
+    form = forms.CustomLinkForm
 
 
 class CustomLinkDeleteView(generic.ObjectDeleteView):
@@ -123,7 +123,7 @@ class ExportTemplateView(generic.ObjectView):
 
 class ExportTemplateEditView(generic.ObjectEditView):
     queryset = ExportTemplate.objects.all()
-    model_form = forms.ExportTemplateForm
+    form = forms.ExportTemplateForm
 
 
 class ExportTemplateDeleteView(generic.ObjectDeleteView):
@@ -166,7 +166,7 @@ class WebhookView(generic.ObjectView):
 
 class WebhookEditView(generic.ObjectEditView):
     queryset = Webhook.objects.all()
-    model_form = forms.WebhookForm
+    form = forms.WebhookForm
 
 
 class WebhookDeleteView(generic.ObjectDeleteView):
@@ -214,7 +214,7 @@ class TagView(generic.ObjectView):
             data=tagged_items,
             orderable=False
         )
-        paginate_table(taggeditem_table, request)
+        taggeditem_table.configure(request)
 
         object_types = [
             {
@@ -232,7 +232,7 @@ class TagView(generic.ObjectView):
 
 class TagEditView(generic.ObjectEditView):
     queryset = Tag.objects.all()
-    model_form = forms.TagForm
+    form = forms.TagForm
 
 
 class TagDeleteView(generic.ObjectDeleteView):
@@ -269,7 +269,7 @@ class ConfigContextListView(generic.ObjectListView):
     filterset = filtersets.ConfigContextFilterSet
     filterset_form = forms.ConfigContextFilterForm
     table = tables.ConfigContextTable
-    action_buttons = ('add',)
+    actions = ('add', 'bulk_edit', 'bulk_delete')
 
 
 class ConfigContextView(generic.ObjectView):
@@ -281,9 +281,11 @@ class ConfigContextView(generic.ObjectView):
             ('Regions', instance.regions.all),
             ('Site Groups', instance.site_groups.all),
             ('Sites', instance.sites.all),
+            ('Locations', instance.locations.all),
             ('Device Types', instance.device_types.all),
             ('Roles', instance.roles.all),
             ('Platforms', instance.platforms.all),
+            ('Cluster Types', instance.cluster_types.all),
             ('Cluster Groups', instance.cluster_groups.all),
             ('Clusters', instance.clusters.all),
             ('Tenant Groups', instance.tenant_groups.all),
@@ -295,9 +297,9 @@ class ConfigContextView(generic.ObjectView):
         if request.GET.get('format') in ['json', 'yaml']:
             format = request.GET.get('format')
             if request.user.is_authenticated:
-                request.user.config.set('extras.configcontext.format', format, commit=True)
+                request.user.config.set('data_format', format, commit=True)
         elif request.user.is_authenticated:
-            format = request.user.config.get('extras.configcontext.format', 'json')
+            format = request.user.config.get('data_format', 'json')
         else:
             format = 'json'
 
@@ -309,8 +311,7 @@ class ConfigContextView(generic.ObjectView):
 
 class ConfigContextEditView(generic.ObjectEditView):
     queryset = ConfigContext.objects.all()
-    model_form = forms.ConfigContextForm
-    template_name = 'extras/configcontext_edit.html'
+    form = forms.ConfigContextForm
 
 
 class ConfigContextBulkEditView(generic.BulkEditView):
@@ -340,9 +341,9 @@ class ObjectConfigContextView(generic.ObjectView):
         if request.GET.get('format') in ['json', 'yaml']:
             format = request.GET.get('format')
             if request.user.is_authenticated:
-                request.user.config.set('extras.configcontext.format', format, commit=True)
+                request.user.config.set('data_format', format, commit=True)
         elif request.user.is_authenticated:
-            format = request.user.config.get('extras.configcontext.format', 'json')
+            format = request.user.config.get('data_format', 'json')
         else:
             format = 'json'
 
@@ -365,7 +366,7 @@ class ObjectChangeListView(generic.ObjectListView):
     filterset_form = forms.ObjectChangeFilterForm
     table = tables.ObjectChangeTable
     template_name = 'extras/objectchange_list.html'
-    action_buttons = ('export',)
+    actions = ('export',)
 
 
 class ObjectChangeView(generic.ObjectView):
@@ -421,70 +422,30 @@ class ObjectChangeView(generic.ObjectView):
         }
 
 
-class ObjectChangeLogView(View):
-    """
-    Present a history of changes made to a particular object.
-
-    base_template: The name of the template to extend. If not provided, "<app>/<model>.html" will be used.
-    """
-    base_template = None
-
-    def get(self, request, model, **kwargs):
-
-        # Handle QuerySet restriction of parent object if needed
-        if hasattr(model.objects, 'restrict'):
-            obj = get_object_or_404(model.objects.restrict(request.user, 'view'), **kwargs)
-        else:
-            obj = get_object_or_404(model, **kwargs)
-
-        # Gather all changes for this object (and its related objects)
-        content_type = ContentType.objects.get_for_model(model)
-        objectchanges = ObjectChange.objects.restrict(request.user, 'view').prefetch_related(
-            'user', 'changed_object_type'
-        ).filter(
-            Q(changed_object_type=content_type, changed_object_id=obj.pk) |
-            Q(related_object_type=content_type, related_object_id=obj.pk)
-        )
-        objectchanges_table = tables.ObjectChangeTable(
-            data=objectchanges,
-            orderable=False
-        )
-        paginate_table(objectchanges_table, request)
-
-        # Default to using "<app>/<model>.html" as the template, if it exists. Otherwise,
-        # fall back to using base.html.
-        if self.base_template is None:
-            self.base_template = f"{model._meta.app_label}/{model._meta.model_name}.html"
-
-        return render(request, 'extras/object_changelog.html', {
-            'object': obj,
-            'table': objectchanges_table,
-            'base_template': self.base_template,
-            'active_tab': 'changelog',
-        })
-
-
 #
 # Image attachments
 #
 
 class ImageAttachmentEditView(generic.ObjectEditView):
     queryset = ImageAttachment.objects.all()
-    model_form = forms.ImageAttachmentForm
+    form = forms.ImageAttachmentForm
+    template_name = 'extras/imageattachment_edit.html'
 
-    def alter_obj(self, instance, request, args, kwargs):
+    def alter_object(self, instance, request, args, kwargs):
         if not instance.pk:
             # Assign the parent object based on URL kwargs
-            try:
-                app_label, model = request.GET.get('content_type').split('.')
-            except (AttributeError, ValueError):
-                raise Http404("Content type not specified")
-            content_type = get_object_or_404(ContentType, app_label=app_label, model=model)
+            content_type = get_object_or_404(ContentType, pk=request.GET.get('content_type'))
             instance.parent = get_object_or_404(content_type.model_class(), pk=request.GET.get('object_id'))
         return instance
 
     def get_return_url(self, request, obj=None):
         return obj.parent.get_absolute_url() if obj else super().get_return_url(request)
+
+    def get_extra_addanother_params(self, request):
+        return {
+            'content_type': request.GET.get('content_type'),
+            'object_id': request.GET.get('object_id'),
+        }
 
 
 class ImageAttachmentDeleteView(generic.ObjectDeleteView):
@@ -503,7 +464,7 @@ class JournalEntryListView(generic.ObjectListView):
     filterset = filtersets.JournalEntryFilterSet
     filterset_form = forms.JournalEntryFilterForm
     table = tables.JournalEntryTable
-    action_buttons = ('export',)
+    actions = ('export', 'bulk_edit', 'bulk_delete')
 
 
 class JournalEntryView(generic.ObjectView):
@@ -512,9 +473,9 @@ class JournalEntryView(generic.ObjectView):
 
 class JournalEntryEditView(generic.ObjectEditView):
     queryset = JournalEntry.objects.all()
-    model_form = forms.JournalEntryForm
+    form = forms.JournalEntryForm
 
-    def alter_obj(self, obj, request, args, kwargs):
+    def alter_object(self, obj, request, args, kwargs):
         if not obj.pk:
             obj.created_by = request.user
         return obj
@@ -523,7 +484,7 @@ class JournalEntryEditView(generic.ObjectEditView):
         if not instance.assigned_object:
             return reverse('extras:journalentry_list')
         obj = instance.assigned_object
-        viewname = f'{obj._meta.app_label}:{obj._meta.model_name}_journal'
+        viewname = get_viewname(obj, 'journal')
         return reverse(viewname, kwargs={'pk': obj.pk})
 
 
@@ -532,70 +493,21 @@ class JournalEntryDeleteView(generic.ObjectDeleteView):
 
     def get_return_url(self, request, instance):
         obj = instance.assigned_object
-        viewname = f'{obj._meta.app_label}:{obj._meta.model_name}_journal'
+        viewname = get_viewname(obj, 'journal')
         return reverse(viewname, kwargs={'pk': obj.pk})
 
 
 class JournalEntryBulkEditView(generic.BulkEditView):
-    queryset = JournalEntry.objects.prefetch_related('created_by')
+    queryset = JournalEntry.objects.all()
     filterset = filtersets.JournalEntryFilterSet
     table = tables.JournalEntryTable
     form = forms.JournalEntryBulkEditForm
 
 
 class JournalEntryBulkDeleteView(generic.BulkDeleteView):
-    queryset = JournalEntry.objects.prefetch_related('created_by')
+    queryset = JournalEntry.objects.all()
     filterset = filtersets.JournalEntryFilterSet
     table = tables.JournalEntryTable
-
-
-class ObjectJournalView(View):
-    """
-    Show all journal entries for an object.
-
-    base_template: The name of the template to extend. If not provided, "<app>/<model>.html" will be used.
-    """
-    base_template = None
-
-    def get(self, request, model, **kwargs):
-
-        # Handle QuerySet restriction of parent object if needed
-        if hasattr(model.objects, 'restrict'):
-            obj = get_object_or_404(model.objects.restrict(request.user, 'view'), **kwargs)
-        else:
-            obj = get_object_or_404(model, **kwargs)
-
-        # Gather all changes for this object (and its related objects)
-        content_type = ContentType.objects.get_for_model(model)
-        journalentries = JournalEntry.objects.restrict(request.user, 'view').prefetch_related('created_by').filter(
-            assigned_object_type=content_type,
-            assigned_object_id=obj.pk
-        )
-        journalentry_table = tables.ObjectJournalTable(journalentries)
-        paginate_table(journalentry_table, request)
-
-        if request.user.has_perm('extras.add_journalentry'):
-            form = forms.JournalEntryForm(
-                initial={
-                    'assigned_object_type': ContentType.objects.get_for_model(obj),
-                    'assigned_object_id': obj.pk
-                }
-            )
-        else:
-            form = None
-
-        # Default to using "<app>/<model>.html" as the template, if it exists. Otherwise,
-        # fall back to using base.html.
-        if self.base_template is None:
-            self.base_template = f"{model._meta.app_label}/{model._meta.model_name}.html"
-
-        return render(request, 'extras/object_journal.html', {
-            'object': obj,
-            'form': form,
-            'table': journalentry_table,
-            'base_template': self.base_template,
-            'active_tab': 'journal',
-        })
 
 
 #
@@ -618,13 +530,14 @@ class ReportListView(ContentTypePermissionRequiredMixin, View):
             for r in JobResult.objects.filter(
                 obj_type=report_content_type,
                 status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-            ).defer('data')
+            ).order_by('name', '-created').distinct('name').defer('data')
         }
 
         ret = []
-        for module, report_list in reports:
+
+        for module, report_list in reports.items():
             module_reports = []
-            for report in report_list:
+            for report in report_list.values():
                 report.result = results.get(report.full_name, None)
                 module_reports.append(report)
             ret.append((module, module_reports))
@@ -682,7 +595,8 @@ class ReportView(ContentTypePermissionRequiredMixin, View):
             run_report,
             report.full_name,
             report_content_type,
-            request.user
+            request.user,
+            job_timeout=report.job_timeout
         )
 
         return redirect('extras:report_result', job_result_pk=job_result.pk)
@@ -697,16 +611,26 @@ class ReportResultView(ContentTypePermissionRequiredMixin, View):
 
     def get(self, request, job_result_pk):
         report_content_type = ContentType.objects.get(app_label='extras', model='report')
-        jobresult = get_object_or_404(JobResult.objects.all(), pk=job_result_pk, obj_type=report_content_type)
+        result = get_object_or_404(JobResult.objects.all(), pk=job_result_pk, obj_type=report_content_type)
 
         # Retrieve the Report and attach the JobResult to it
-        module, report_name = jobresult.name.split('.')
+        module, report_name = result.name.split('.', maxsplit=1)
         report = get_report(module, report_name)
-        report.result = jobresult
+        report.result = result
+
+        # If this is an HTMX request, return only the result HTML
+        if is_htmx(request):
+            response = render(request, 'extras/htmx/report_result.html', {
+                'report': report,
+                'result': result,
+            })
+            if result.completed:
+                response.status_code = 286
+            return response
 
         return render(request, 'extras/report_result.html', {
             'report': report,
-            'result': jobresult,
+            'result': result,
         })
 
 
@@ -739,7 +663,7 @@ class ScriptListView(ContentTypePermissionRequiredMixin, View):
             for r in JobResult.objects.filter(
                 obj_type=script_content_type,
                 status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-            ).defer('data')
+            ).order_by('name', '-created').distinct('name').defer('data')
         }
 
         for _scripts in scripts.values():
@@ -758,7 +682,7 @@ class ScriptView(ContentTypePermissionRequiredMixin, GetScriptMixin, View):
 
     def get(self, request, module, name):
         script = self._get_script(name, module)
-        form = script.as_form(initial=request.GET)
+        form = script.as_form(initial=normalize_querydict(request.GET))
 
         # Look for a pending JobResult (use the latest one by creation timestamp)
         script_content_type = ContentType.objects.get(app_label='extras', model='script')
@@ -792,6 +716,7 @@ class ScriptView(ContentTypePermissionRequiredMixin, GetScriptMixin, View):
             commit = form.cleaned_data.pop('_commit')
 
             script_content_type = ContentType.objects.get(app_label='extras', model='script')
+
             job_result = JobResult.enqueue_job(
                 run_script,
                 script.full_name,
@@ -799,7 +724,8 @@ class ScriptView(ContentTypePermissionRequiredMixin, GetScriptMixin, View):
                 request.user,
                 data=form.cleaned_data,
                 request=copy_safe_request(request),
-                commit=commit
+                commit=commit,
+                job_timeout=script.job_timeout,
             )
 
             return redirect('extras:script_result', job_result_pk=job_result.pk)
@@ -823,6 +749,16 @@ class ScriptResultView(ContentTypePermissionRequiredMixin, GetScriptMixin, View)
             raise Http404
 
         script = self._get_script(result.name)
+
+        # If this is an HTMX request, return only the result HTML
+        if is_htmx(request):
+            response = render(request, 'extras/htmx/script_result.html', {
+                'script': script,
+                'result': result,
+            })
+            if result.completed:
+                response.status_code = 286
+            return response
 
         return render(request, 'extras/script_result.html', {
             'script': script,

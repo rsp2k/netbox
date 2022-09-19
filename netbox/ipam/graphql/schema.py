@@ -5,6 +5,9 @@ from .types import *
 
 
 class IPAMQuery(graphene.ObjectType):
+    asn = ObjectField(ASNType)
+    asn_list = ObjectListField(ASNType)
+
     aggregate = ObjectField(AggregateType)
     aggregate_list = ObjectListField(AggregateType)
 
@@ -13,6 +16,12 @@ class IPAMQuery(graphene.ObjectType):
 
     ip_range = ObjectField(IPRangeType)
     ip_range_list = ObjectListField(IPRangeType)
+
+    l2vpn = ObjectField(L2VPNType)
+    l2vpn_list = ObjectListField(L2VPNType)
+
+    l2vpn_termination = ObjectField(L2VPNTerminationType)
+    l2vpn_termination_list = ObjectListField(L2VPNTerminationType)
 
     prefix = ObjectField(PrefixType)
     prefix_list = ObjectListField(PrefixType)
@@ -28,6 +37,15 @@ class IPAMQuery(graphene.ObjectType):
 
     service = ObjectField(ServiceType)
     service_list = ObjectListField(ServiceType)
+
+    service_template = ObjectField(ServiceTemplateType)
+    service_template_list = ObjectListField(ServiceTemplateType)
+
+    fhrp_group = ObjectField(FHRPGroupType)
+    fhrp_group_list = ObjectListField(FHRPGroupType)
+
+    fhrp_group_assignment = ObjectField(FHRPGroupAssignmentType)
+    fhrp_group_assignment_list = ObjectListField(FHRPGroupAssignmentType)
 
     vlan = ObjectField(VLANType)
     vlan_list = ObjectListField(VLANType)
